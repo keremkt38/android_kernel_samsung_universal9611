@@ -63,6 +63,7 @@ void dlog_hook_rmdir(struct dentry *, struct path *);
 extern int user_path_mountpoint_at(int, const char __user *, unsigned int, struct path *);
 extern int vfs_path_lookup(struct dentry *, struct vfsmount *,
 			   const char *, unsigned int, struct path *);
+long do_unlinkat(int dfd, struct filename *name);
 
 /*
  * namespace.c
