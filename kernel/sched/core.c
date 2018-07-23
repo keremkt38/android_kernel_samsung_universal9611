@@ -3651,6 +3651,8 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 
 	if (current->set_child_tid)
 		put_user(task_pid_vnr(current), current->set_child_tid);
+
+	calculate_sigpending();
 }
 
 /*
