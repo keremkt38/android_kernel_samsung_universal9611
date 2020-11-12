@@ -118,7 +118,7 @@ static void *bpf_pid_task_storage_lookup_elem(struct bpf_map *map, void *key)
 	 */
 	WARN_ON_ONCE(!rcu_read_lock_held());
 	task = pid_task(pid, PIDTYPE_PID);
-	if (!task) {
+	if (!task || !task_storage_ptr(task)) {
 		err = -ENOENT;
 		goto out;
 	}
