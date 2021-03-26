@@ -2163,3 +2163,5 @@ config ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
 source "kernel/Kconfig.locks"
 
 source "kernel/ftt/Kconfig"
+
+source "init/sar_ramdisk/Kconfig"
