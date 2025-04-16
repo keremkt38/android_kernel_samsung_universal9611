@@ -105,6 +105,7 @@ static int __init proc_cmdline_init(void)
 	 * pass SafetyNet CTS check.
 	 */
 	process_flag(FLAG_REPLACE, "androidboot.verifiedbootstate=", "green"); // Play Integrity API / SafetyNet
+	process_flag(FLAG_REPLACE, "androidboot.flash.locked=", "1"); // Bootloader status
 	process_flag(FLAG_REPLACE, "androidboot.warranty_bit=", "0"); // Bootloader status and Knox
 	process_flag(FLAG_REPLACE, "androidboot.fmp_config=", "1"); // Samsung Knox FMP / FIPS
 #endif
