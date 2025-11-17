@@ -1002,6 +1002,10 @@ static int __mfc_dec_get_ctrl_val(struct mfc_ctx *ctx, struct v4l2_control *ctrl
 	case V4L2_CID_MPEG_MFC_GET_DRIVER_INFO:
 		ctrl->value = MFC_DRIVER_INFO;
 		break;
+	case V4L2_CID_MPEG_VIDEO_PRIORITY:
+		ctrl->value = ctx->prio;
+		mfc_debug(2, "[PRIO] user get priority: %d\n", ctrl->value);
+		break;
 	default:
 		list_for_each_entry(ctx_ctrl, &ctx->ctrls, list) {
 			if (!(ctx_ctrl->type & MFC_CTRL_TYPE_GET))
