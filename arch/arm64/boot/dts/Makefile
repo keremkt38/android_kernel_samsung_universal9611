@@ -10,6 +10,10 @@ dtbo-y += samsung/exynos9611-m31_eur_open_00.dtbo
 dtbo-y += samsung/exynos9611-m31_eur_open_01.dtbo
 dtbo-y += samsung/exynos9611-m21_swa_open_06.dtbo
 dtbo-y += samsung/exynos9611-m21_swa_open_00.dtbo
+dtbo-y += samsung/exynos9611-m30s_swa_open_02.dtbo
+dtbo-y += samsung/exynos9611-m30s_swa_open_00.dtbo
+dtbo-y += samsung/exynos9611-m30s_swa_open_03.dtbo
+dtbo-y += samsung/exynos9611-m30s_swa_open_04.dtbo
 
 dtbo-y += samsung/exynos9611-gta4xlwifi_eur_open_05.dtbo
 dtbo-y += samsung/exynos9611-gta4xlwifi_eur_open_08.dtbo
