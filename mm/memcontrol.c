@@ -2015,7 +2015,7 @@ static unsigned long calculate_high_delay(struct mem_cgroup *memcg,
 		u64 overage;
 
 		usage = page_counter_read(&memcg->memory);
-		high = READ_ONCE(memcg->high);
+		high = READ_ONCE(memcg->memory.high);
 
 		/*
 		 * Prevent division by 0 in overage calculation by acting as if
