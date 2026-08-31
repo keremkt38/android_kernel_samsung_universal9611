@@ -37,6 +37,12 @@ config SENSORS_SSP_GTA4XL
 	help
 	  If you want to use sensor hub for g4a4xl project, it should be set.
 
+config SENSORS_SSP_M30S
+	tristate "Sensors ssp m30s"
+	default n
+	help
+	  If you want to use sensor hub for m30s project, it should be set.
+
 config SENSORS_SSP_M31
 	tristate "Sensors ssp m31"
 	default n
@@ -222,4 +228,3 @@ config SENSORS_ISG5320A_SUB
 	  IMAGIS ISG5320A_SUB device driver for grip sub.
 	  
 source "drivers/sensorhub/factory/Kconfig"
-
