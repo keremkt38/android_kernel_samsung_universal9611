@@ -12,7 +12,7 @@ struct wake_lock mms_wake_lock;
 #endif
 
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-#include <linux/t-base-tui.h>
+#include <linux/trustedui.h>
 #endif
 
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
@@ -26,81 +26,26 @@ struct mms_ts_info *tsp_info;
 /**
  * Reboot chip
  *
- * Caution : IRQ must be disabled before mms_power_reboot and enabled after mms_power_reboot.
+ * Caution : IRQ must be disabled before mms_reboot and enabled after mms_reboot.
  */
-void mms_power_reboot(struct mms_ts_info *info)
+void mms_reboot(struct mms_ts_info *info)
 {
+	struct i2c_adapter *adapter = to_i2c_adapter(info->client->dev.parent);
+
 	input_dbg(true, &info->client->dev, "%s [START]\n", __func__);
 
-	mutex_lock(&info->modechange);
+	i2c_lock_adapter(adapter);
 
 	mms_power_control(info, 0);
 	mms_power_control(info, 1);
 
-	mutex_unlock(&info->modechange);
+	i2c_unlock_adapter(adapter);
+
+	msleep(30);
 
 	input_info(true, &info->client->dev, "%s [DONE]\n", __func__);
 }
 
-/** reinit **/
-void mms_reset_work(struct work_struct *work)
-{
-	struct mms_ts_info *info = container_of(work, struct mms_ts_info,
-			reset_work.work);
-	int ret;
-
-	input_info(true, &info->client->dev, "%s [START]\n", __func__);
-
-	if (info->reset_is_on_going) {
-		input_err(true, &info->client->dev, "%s: reset is ongoing\n", __func__);
-		return;
-	}
-
-	mutex_lock(&info->modechange);
-	info->reset_is_on_going = true;
-
-	mms_disable(info);
-	ret = mms_enable(info);
-	if (ret) {
-		input_err(true, &info->client->dev, "%s: failed to reset\n", __func__);
-		info->reset_is_on_going = false;
-		cancel_delayed_work(&info->reset_work);
-		schedule_delayed_work(&info->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
-		mutex_unlock(&info->modechange);
-		return;
-	}
-
-	if (info->input_dev->disabled) {
-		if (info->prox_power_off) {
-			input_report_key(info->input_dev, KEY_INT_CANCEL, 1);
-			input_sync(info->input_dev);
-			input_report_key(info->input_dev, KEY_INT_CANCEL, 0);
-			input_sync(info->input_dev);
-		}
-
-		if (info->lowpower_mode || ((info->ed_enable || info->pocket_enable) && info->dtdata->support_protos) ||
-			info->fod_lp_mode) {
-			ret = mms_lowpower_mode(info, TO_LOWPOWER_MODE);
-			if (ret < 0) {
-				input_err(true, &info->client->dev, "%s: failed to reset\n", __func__);
-				info->reset_is_on_going = false;
-				cancel_delayed_work(&info->reset_work);
-				schedule_delayed_work(&info->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
-				mutex_unlock(&info->modechange);
-				return;
-			}
-			mms_set_aod_rect(info);
-		} else {
-			mms_disable(info);
-		}
-
-		info->noise_mode = 0;
-		info->wet_mode = 0;
-	}
-	info->reset_is_on_going = false;
-	mutex_unlock(&info->modechange);
-	input_info(true, &info->client->dev, "%s [DONE]\n", __func__);
-}
 /**
  * I2C Read
  */
@@ -126,7 +71,7 @@ int mms_i2c_read(struct mms_ts_info *info, char *write_buf, unsigned int write_l
 
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	if (TRUSTEDUI_MODE_INPUT_SECURED & trustedui_get_current_mode()) {
-		input_err(true, &info->client->dev,
+		input_err(&info->client->dev,
 			"%s TSP no accessible from Linux, TUI is enabled!\n", __func__);
 		return -EIO;
 	}
@@ -165,8 +110,7 @@ int mms_i2c_read(struct mms_ts_info *info, char *write_buf, unsigned int write_l
 	goto ERROR_REBOOT;
 
 ERROR_REBOOT:
-	if (!info->init && !info->reset_is_on_going)
-		schedule_delayed_work(&info->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
+	mms_reboot(info);
 ERROR:
 	return 1;
 
@@ -187,7 +131,7 @@ int mms_i2c_read_next(struct mms_ts_info *info, char *read_buf, int start_idx,
 
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	if (TRUSTEDUI_MODE_INPUT_SECURED & trustedui_get_current_mode()) {
-		input_err(true, &info->client->dev,
+		input_err(&info->client->dev,
 			"%s TSP no accessible from Linux, TUI is enabled!\n", __func__);
 		return -EIO;
 	}
@@ -226,8 +170,7 @@ int mms_i2c_read_next(struct mms_ts_info *info, char *read_buf, int start_idx,
 	goto ERROR_REBOOT;
 
 ERROR_REBOOT:
-	if (!info->init && !info->reset_is_on_going)
-		schedule_delayed_work(&info->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
+	mms_reboot(info);
 ERROR:
 	return 1;
 
@@ -247,7 +190,7 @@ int mms_i2c_write(struct mms_ts_info *info, char *write_buf, unsigned int write_
 
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	if (TRUSTEDUI_MODE_INPUT_SECURED & trustedui_get_current_mode()) {
-		input_err(true, &info->client->dev,
+		input_err(&info->client->dev,
 			"%s TSP no accessible from Linux, TUI is enabled!\n", __func__);
 		return -EIO;
 	}
@@ -286,8 +229,7 @@ int mms_i2c_write(struct mms_ts_info *info, char *write_buf, unsigned int write_
 	goto ERROR_REBOOT;
 
 ERROR_REBOOT:
-	if (!info->init && !info->reset_is_on_going)	
-		schedule_delayed_work(&info->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
+	mms_reboot(info);
 ERROR:
 	return 1;
 
@@ -295,103 +237,12 @@ DONE:
 	return 0;
 }
 
-int mms_reinit(struct mms_ts_info *info)
-{
-	u8 wbuf[4];
-	int ret = 0;
-	u8 mode = G_NONE;
-
-	input_info(true, &info->client->dev, "%s: start reinit\n", __func__);
-
-	if (info->disable_esd == true) {
-		ret = mms_disable_esd_alert(info);
-		if (ret) {
-			input_err(true, &info->client->dev, "%s: failed to disable_esd_alert\n", __func__);
-			return -EINVAL;
-		}
-	}
-
-#ifdef CONFIG_VBUS_NOTIFIER
-	if (info->ta_stsatus) {
-		ret = mms_charger_attached(info, true);
-		if (ret) {
-			input_err(true, &info->client->dev, "%s: failed to mms_charger_attached\n", __func__);
-			return -EINVAL;
-		}
-	}
-#endif
-#ifdef COVER_MODE
-	if (info->cover_mode) {
-		ret = set_cover_type(info);
-		if (ret < 0) {
-			input_err(true, &info->client->dev, "%s: failed to set cover_mode\n", __func__);
-			return -EINVAL;
-		}
-	}
-#endif
-
-	if (info->ed_enable) {
-		wbuf[0] = MIP_R0_CTRL;
-		wbuf[1] = MIP_R1_CTRL_PROXIMITY;
-		wbuf[2] = 1;
-	
-		input_info(true, &info->client->dev, "%s: set ed_enable\n", __func__);
-
-		ret = mms_i2c_write(info, wbuf, 3);
-		if (ret) {
-			input_err(true, &info->client->dev, "%s: failed to set ed_enable\n", __func__);
-			return -EINVAL;
-		}
-	}
-
-	if (info->pocket_enable) {
-		wbuf[0] = MIP_R0_CTRL;
-		wbuf[1] = MIP_R1_CTRL_POCKET_MODE;
-		wbuf[2] = 1;
-
-		ret = mms_i2c_write(info, wbuf, 3);
-		if (ret) {
-			input_err(true, &info->client->dev, "%s: failed to set pocket mode enable\n", __func__);
-			return -EINVAL;
-		}
-	}
-
-#ifdef GLOVE_MODE
-	if (info->glove_mode) {
-		wbuf[0] = MIP_R0_CTRL;
-		wbuf[1] = MIP_R1_CTRL_GLOVE_MODE;
-		wbuf[2] = 1;
-	
-		input_info(true, &info->client->dev, "%s: set glove mode/n", __func__);
-
-		ret = mms_i2c_write(info, wbuf, 3);
-		if (ret) {
-			input_err(true, &info->client->dev, "%s: failed to set glove mode\n", __func__);
-			return -EINVAL;
-		}
-	}
-#endif
-
-	mode = mode | G_SET_EDGE_HANDLER;
-	set_grip_data_to_ic(info, mode);
-
-	ret = mms_set_fod_rect(info);
-	if (ret < 0) {
-		input_info(true, &info->client->dev, "%s: failed/n", __func__);
-		return -EINVAL;
-	}
-
-	input_info(true, &info->client->dev, "%s: done reinit\n", __func__);
-
-	return ret;
-}
-
 /**
  * Enable device
  */
 int mms_enable(struct mms_ts_info *info)
 {
-	int ret = 0;
+	u8 wbuf[4];
 
 	input_dbg(true, &info->client->dev, "%s [START]\n", __func__);
 
@@ -411,14 +262,54 @@ int mms_enable(struct mms_ts_info *info)
 
 	enable_irq(info->client->irq);
 
-	ret = mms_reinit(info);
-	if (ret < 0)
-		input_info(true, &info->client->dev, "%s: failed\n", __func__);
-
 	mutex_unlock(&info->lock);
 
+	if (info->disable_esd == true)
+		mms_disable_esd_alert(info);
+
+#ifdef CONFIG_VBUS_NOTIFIER
+	if (info->ta_stsatus)
+		mms_charger_attached(info, true);
+#endif
+#ifdef COVER_MODE
+	if (info->cover_mode) {
+		input_info(true, &info->client->dev, "%s clear_cover_mode on\n", __func__);
+
+		wbuf[0] = MIP_R0_CTRL;
+		wbuf[1] = MIP_R1_CTRL_WINDOW_MODE;
+		wbuf[2] = 3;
+
+		if (mms_i2c_write(info, wbuf, 3))
+			input_err(true, &info->client->dev, "%s [ERROR] clear_cover_mode mms_i2c_write\n", __func__);
+	}
+#endif
+
+	if (info->ed_enable) {
+		wbuf[0] = MIP_R0_CTRL;
+		wbuf[1] = MIP_R1_CTRL_PROXIMITY;
+		wbuf[2] = 1;
+	
+		input_info(true, &info->client->dev, "%s: set ed_enable\n", __func__);
+	
+		if (mms_i2c_write(info, wbuf, 3))
+			input_err(true, &info->client->dev, "%s: failed to set ed_enable\n", __func__);
+	}
+
+#ifdef GLOVE_MODE
+	if (info->glove_mode) {
+		wbuf[0] = MIP_R0_CTRL;
+		wbuf[1] = MIP_R1_CTRL_GLOVE_MODE;
+		wbuf[2] = 1;
+	
+		input_info(true, &info->client->dev, "%s: set glove mode/n", __func__);
+	
+		if (mms_i2c_write(info, wbuf, 3))
+			input_err(true, &info->client->dev, "%s: failed to set glove mode\n", __func__);
+	}
+#endif
+
 	input_info(true, &info->client->dev, "%s [DONE]\n", __func__);
-	return ret;
+	return 0;
 }
 
 /**
@@ -440,6 +331,13 @@ int mms_disable(struct mms_ts_info *info)
 
 	info->enabled = false;
 	info->ic_status = PWR_OFF;
+
+	if (info->prox_power_off) {
+		input_report_key(info->input_dev, KEY_INT_CANCEL, 1);
+		input_sync(info->input_dev);
+		input_report_key(info->input_dev, KEY_INT_CANCEL, 0);
+		input_sync(info->input_dev);
+	}
 
 	mms_clear_input(info);
 	mms_power_control(info, 0);
@@ -475,12 +373,12 @@ static int mms_input_open(struct input_dev *dev)
 
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	if (TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()) {
-		input_err(true, &info->client->dev, "%s TUI cancel event call!\n", __func__);
+		input_err(&info->client->dev, "%s TUI cancel event call!\n", __func__);
 		msleep(100);
 		tui_force_close(1);
 		msleep(200);
 		if (TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()) {
-			input_err(true, &info->client->dev, "%s TUI flag force clear!\n",	__func__);
+			input_err(&info->client->dev, "%s TUI flag force clear!\n",	__func__);
 			trustedui_clear_mask(TRUSTEDUI_MODE_VIDEO_SECURED|TRUSTEDUI_MODE_INPUT_SECURED);
 			trustedui_set_mode(TRUSTEDUI_MODE_OFF);
 		}
@@ -495,7 +393,12 @@ static int mms_input_open(struct input_dev *dev)
  	}
 
 	if (info->ic_status == LP_MODE) {
+		if (device_may_wakeup(&info->client->dev))
+			disable_irq_wake(info->client->irq);
+
+		disable_irq(info->client->irq);
 		mms_lowpower_mode(info, TO_TOUCH_MODE);
+		enable_irq(info->client->irq);
 #ifdef CONFIG_VBUS_NOTIFIER
 		if (info->ta_stsatus)
 			mms_charger_attached(info, true);
@@ -504,12 +407,10 @@ static int mms_input_open(struct input_dev *dev)
 		mms_enable(info);
 	}
 	mutex_unlock(&info->modechange);
-
 	cancel_delayed_work(&info->work_print_info);
 	info->print_info_cnt_open = 0;
 	info->print_info_cnt_release = 0;
 	schedule_work(&info->work_print_info.work);
-
 	return 0;
 }
 
@@ -532,32 +433,32 @@ static void mms_input_close(struct input_dev *dev)
 
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	if (TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()) {
-		input_err(true, &info->client->dev, "%s TUI cancel event call!\n", __func__);
+		input_err(&info->client->dev, "%s TUI cancel event call!\n", __func__);
 		msleep(100);
 		tui_force_close(1);
 		msleep(200);
 		if (TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()) {
-			input_err(true, &info->client->dev, "%s TUI flag force clear!\n", __func__);
+			input_err(&info->client->dev, "%s TUI flag force clear!\n",	__func__);
 			trustedui_clear_mask(TRUSTEDUI_MODE_VIDEO_SECURED|TRUSTEDUI_MODE_INPUT_SECURED);
 			trustedui_set_mode(TRUSTEDUI_MODE_OFF);
 		}
 	}
 #endif
 
-	cancel_delayed_work(&info->reset_work);
-
-	if (info->prox_power_off) {
-		input_report_key(info->input_dev, KEY_INT_CANCEL, 1);
-		input_sync(info->input_dev);
-		input_report_key(info->input_dev, KEY_INT_CANCEL, 0);
-		input_sync(info->input_dev);
-	}
-
-	if (info->lowpower_mode || ((info->ed_enable || info->pocket_enable) && info->dtdata->support_protos) ||
-		info->fod_lp_mode)
+	if (info->lowpower_mode || info->fod_lp_mode) {
 		mms_lowpower_mode(info, TO_LOWPOWER_MODE);
-	else
+		if (info->prox_power_off) {
+			input_report_key(info->input_dev, KEY_INT_CANCEL, 1);
+			input_sync(info->input_dev);
+			input_report_key(info->input_dev, KEY_INT_CANCEL, 0);
+			input_sync(info->input_dev);
+		}
+		mms_clear_input(info);
+		if (device_may_wakeup(&info->client->dev))
+			enable_irq_wake(info->client->irq);
+	} else {
 		mms_disable(info);
+	}
 
 	info->noise_mode = 0;
 	info->wet_mode = 0;
@@ -731,14 +632,12 @@ static int mms_alert_handler_esd(struct mms_ts_info *info, u8 *rbuf)
 				info->disable_esd = true;
 		} else {
 			//Reset chip
-			if (!info->reset_is_on_going)
-				schedule_work(&info->reset_work.work);
+			mms_reboot(info);
 		}
 	} else {
 		//ESD detected
 		//Reset chip
-		if (!info->reset_is_on_going)
-			schedule_work(&info->reset_work.work);
+		mms_reboot(info);
 		info->esd_cnt = 0;
 	}
 
@@ -801,54 +700,6 @@ int mms_alert_handler_sponge(struct mms_ts_info *info, u8 *rbuf, u8 size)
 	return 0;
 }
 
-static int mms_alert_handler_pocket_mode_state(struct mms_ts_info *info, u8 data)
-{
-	input_info(true, &info->client->dev, "%s: pocket event(%d)\n", __func__, data);
-
-	if (data == IN_POCKET || data == OUT_POCKET) {
-		input_report_abs(info->input_dev_proximity, ABS_MT_CUSTOM, data);
-		input_sync(info->input_dev_proximity);
-	}
-
-	return 0;
-}
-
-static int mms_alert_handler_proximity_state(struct mms_ts_info *info, u8 data)
-{
-	bool report = false;
-
-	if (!info->dtdata->support_protos) {
-		if (data == 4 || data == 5) {
-			input_info(true, &info->client->dev, "%s: not support protos %d\n", __func__, data);
-			return 0;
-		}
-	}
-	report |= info->lowpower_mode;
-	if (info->touch_count > 0) {
-		int i;
-		for (i = 0; i < MAX_FINGER_NUM; i++) {
-			if (info->finger_state[i]) {
-				if (info->coord[i].y < 700 && info->coord[i].x > 900 && info->coord[i].x < 3000) {
-					report |= true;
-					break;
-				}
-			}
-		}
-	}
-	if (report) {
-		data = data == 5 || !data;
-	} else {
-		data = 1;
-	}
-
-	input_info(true, &info->client->dev, "%s: hover %d\n", __func__, data);
-	info->hover_event = data;
-
-	input_report_abs(info->input_dev_proximity, ABS_MT_CUSTOM, data);
-	input_sync(info->input_dev_proximity);
-	return 0;
-}
-
 /*
  * Alert event handler - mode state
  */
@@ -856,9 +707,6 @@ static int mms_alert_handler_proximity_state(struct mms_ts_info *info, u8 data)
 #define EXIT_NOISE_MODE		1
 #define ENTER_WET_MODE		2
 #define EXIT_WET_MODE		3
-#define MODE_STATE_VSYNC_ON	4
-#define MODE_STATE_VSYNC_OFF	5
-
 static int mms_alert_handler_mode_state(struct mms_ts_info *info, u8 data)
 {
 	if (data == ENTER_NOISE_MODE) {
@@ -873,12 +721,8 @@ static int mms_alert_handler_mode_state(struct mms_ts_info *info, u8 data)
 	} else if (data == EXIT_WET_MODE) {
 		input_info(true, &info->client->dev, "%s: WET MODE OFF[%d]\n", __func__, data);
 		info->wet_mode = 0;
-	} else if (data == MODE_STATE_VSYNC_ON) {
-		input_info(true, &info->client->dev, "%s: VSYNC ON[%d]\n", __func__, data);
-	} else if (data == MODE_STATE_VSYNC_OFF) {
-		input_info(true, &info->client->dev, "%s: VSYNC OFF[%d]\n", __func__, data);
 	} else {
-		input_info(true, &info->client->dev, "%s: NOT DEFINED[%d]\n", __func__, data);
+		input_info(true, &info->client->dev, "%s: MOT DEFINED[%d]\n", __func__, data);
 		return 1;
 	}
 
@@ -889,7 +733,6 @@ static int mms_alert_handler_mode_state(struct mms_ts_info *info, u8 data)
 int mms_charger_attached(struct mms_ts_info *info, bool status)
 {
 	u8 wbuf[4];
-	int ret = 0;
 
 	input_info(true, &info->client->dev, "%s [START] %s\n", __func__, status ? "connected" : "disconnected");
 
@@ -898,8 +741,7 @@ int mms_charger_attached(struct mms_ts_info *info, bool status)
 	wbuf[2] = status;
 
 	if ((status == 0) || (status == 1)) {
-		ret = mms_i2c_write(info, wbuf, 3);
-		if (ret)
+		if (mms_i2c_write(info, wbuf, 3))
 			input_err(true, &info->client->dev, "%s [ERROR] mms_i2c_write\n", __func__);
 		else
 			input_info(true, &info->client->dev, "%s - value[%d]\n", __func__, wbuf[2]);
@@ -907,7 +749,7 @@ int mms_charger_attached(struct mms_ts_info *info, bool status)
 		input_err(true, &info->client->dev, "%s [ERROR] Unknown value[%d]\n", __func__, status);
 	}
 	input_dbg(true, &info->client->dev, "%s [DONE]\n", __func__);
-	return ret;
+	return 0;
 }
 #endif
 
@@ -918,9 +760,8 @@ static irqreturn_t mms_interrupt(int irq, void *dev_id)
 {
 	struct mms_ts_info *info = dev_id;
 	struct i2c_client *client = info->client;
-	unsigned int packet_size = info->event_size * MAX_FINGER_NUM + 1;
 	u8 wbuf[8];
-	u8 rbuf[packet_size];
+	u8 rbuf[256];
 	unsigned int size = 0;
 	u8 category = 0;
 	u8 alert_type = 0;
@@ -956,24 +797,11 @@ static irqreturn_t mms_interrupt(int irq, void *dev_id)
 	input_dbg(false, &client->dev, "%s - info [0x%02X]\n", __func__, rbuf[0]);
 
 	//Check event
+	size = (rbuf[0] & 0x7F);
 	category = ((rbuf[0] >> 7) & 0x1);
-	if (info->event_size_type == 1 && category == 0)
-		size = (rbuf[0] & 0x7F) * info->event_size;
-	else
-		size = (rbuf[0] & 0x7F);
-
 	input_dbg(false, &client->dev, "%s - packet info : size[%d] category[%d]\n", __func__, size, category);
-
-	if ((size == 0) || (size > packet_size)) {
+	if ((size <= 0) || (size > 200)) {
 		input_err(true, &client->dev, "%s [ERROR] packet size = %d\n", __func__, size);
-
-		size = packet_size;
-
-		wbuf[0] = MIP_R0_EVENT;
-		wbuf[1] = MIP_R1_EVENT_PACKET_DATA;
-		mms_i2c_read(info, wbuf, 2, rbuf, size);
-
-		mms_clear_input(info);
 		goto ERROR;
 	}
 
@@ -1009,12 +837,6 @@ static irqreturn_t mms_interrupt(int irq, void *dev_id)
 		} else if (alert_type == MIP_ALERT_MODE_STATE) {
 			if (mms_alert_handler_mode_state(info, rbuf[1]))
 				goto ERROR;
-		} else if (alert_type == MIP_ALERT_POCKET_MODE_STATE) {
-			if (mms_alert_handler_pocket_mode_state(info, rbuf[1]))
-				goto ERROR;
-		} else if (alert_type == MIP_ALERT_PROXIMITY_STATE) {
-			if (mms_alert_handler_proximity_state(info, rbuf[1]))
-				goto ERROR;
 		} else {
 			input_err(true, &client->dev, "%s [ERROR] Unknown alert type [%d]\n",
 				__func__, alert_type);
@@ -1029,7 +851,10 @@ ERROR:
 	input_err(true, &client->dev, "%s [ERROR]\n", __func__);
 	if (RESET_ON_EVENT_ERROR) {
 		input_info(true, &client->dev, "%s - Reset on error\n", __func__);
-		schedule_delayed_work(&info->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
+
+		mms_disable(info);
+		mms_clear_input(info);
+		mms_enable(info);
 	}
 	return IRQ_HANDLED;
 }
@@ -1037,7 +862,7 @@ ERROR:
 /**
  * Update firmware from kernel built-in binary
  */
-int mms_fw_update_from_kernel(struct mms_ts_info *info, bool force, bool on_probe)
+int mms_fw_update_from_kernel(struct mms_ts_info *info, bool force)
 {
 	const char *fw_name = info->dtdata->fw_name;
 	const struct firmware *fw;
@@ -1072,7 +897,7 @@ int mms_fw_update_from_kernel(struct mms_ts_info *info, bool force, bool on_prob
 
 	//Update fw
 	do {
-		ret = mip4_ts_flash_fw(info, fw->data, fw->size, force, true, on_probe);
+		ret = mip4_ts_flash_fw(info, fw->data, fw->size, force, true, true);
 		if (ret >= FW_ERR_NONE)
 			break;
 	} while (--retires);
@@ -1102,15 +927,12 @@ ERROR:
 /**
  * Update firmware from external storage
  */
-extern int long spu_firmware_signature_verify(const char* fw_name, const u8* fw_data, const long fw_size);
-int mms_fw_update_from_storage(struct mms_ts_info *info, bool force, bool signing, const char *file_path)
+int mms_fw_update_from_storage(struct mms_ts_info *info, bool force)
 {
 	struct file *fp;
 	mm_segment_t old_fs;
 	size_t fw_size, nread;
 	int ret = 0;
-	size_t spu_fw_size;
-	size_t spu_ret = 0;
 
 	input_info(true, &info->client->dev, "%s [START]\n", __func__);
 
@@ -1122,101 +944,113 @@ int mms_fw_update_from_storage(struct mms_ts_info *info, bool force, bool signin
 	//Get firmware
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
-	fp = filp_open(file_path, O_RDONLY, 0400);
+	fp = filp_open(EXTERNAL_FW_PATH, O_RDONLY, 0400);
 	if (IS_ERR(fp)) {
 		input_err(true, &info->client->dev, "%s [ERROR] file_open - path[%s]\n",
-			__func__, file_path);
+			__func__, EXTERNAL_FW_PATH);
 		ret = FW_ERR_FILE_OPEN;
-		set_fs(old_fs);
-		enable_irq(info->client->irq);
-		mutex_unlock(&info->lock);
-		return FW_ERR_FILE_OPEN;
+		goto ERROR;
 	}
 
 	fw_size = fp->f_path.dentry->d_inode->i_size;
-
-	if (signing) {
-		/* name 3, digest 32, signature 512 */
-		spu_fw_size = fw_size;
-		fw_size -= SPU_METADATA_SIZE(TSP);
-	}
-
 	if (fw_size > 0) {
 		unsigned char *fw_data;
-		unsigned char *spu_fw_data;
 
 		fw_data = vzalloc(fw_size);
 		if (!fw_data) {
+			filp_close(fp, current->files);
 			ret = -ENOMEM;
 			goto ERROR;
 		}
 
-		if (signing) {
-			spu_fw_data = vzalloc(spu_fw_size);
-			if (!fw_data) {
-				ret = -ENOMEM;
-				vfree(fw_data);
-				goto ERROR;
-			}
+		nread = vfs_read(fp, (char __user *)fw_data, fw_size, &fp->f_pos);
+		input_info(true, &info->client->dev, "%s - path [%s] size [%zu]\n",
+			__func__, EXTERNAL_FW_PATH, fw_size);
 
-			nread = vfs_read(fp, (char __user *)spu_fw_data, spu_fw_size, &fp->f_pos);
-			input_info(true, &info->client->dev, "%s - path [%s] size [%zu]\n",
-					__func__, file_path, spu_fw_size);
-
-			if (nread != spu_fw_size) {
-				input_err(true, &info->client->dev, "%s [ERROR] vfs_read - size[%zu] read[%zu]\n",
-					__func__, fw_size, nread);
-				ret = FW_ERR_FILE_READ;
-				vfree(spu_fw_data);
-				vfree(fw_data);
-				goto ERROR;
-			}
-
-			spu_ret = spu_firmware_signature_verify("TSP", spu_fw_data, spu_fw_size);
-			if (spu_ret != fw_size) {
-				input_err(true, &info->client->dev, "%s: signature verify failed, %zu\n",
-						__func__, spu_ret);
-				ret = -EINVAL;
-				vfree(spu_fw_data);
-				vfree(fw_data);
-				goto ERROR;
-			}
-
-			memcpy(fw_data, spu_fw_data, fw_size);
-			vfree(spu_fw_data);
+		if (nread != fw_size) {
+			input_err(true, &info->client->dev, "%s [ERROR] vfs_read - size[%zu] read[%zu]\n",
+				__func__, fw_size, nread);
+			ret = FW_ERR_FILE_READ;
 		} else {
-			nread = vfs_read(fp, (char __user *)fw_data, fw_size, &fp->f_pos);
-			input_info(true, &info->client->dev, "%s - path [%s] size [%zu]\n",
-				__func__, file_path, fw_size);
-
-			if (nread != fw_size) {
-				input_err(true, &info->client->dev, "%s [ERROR] vfs_read - size[%zu] read[%zu]\n",
-					__func__, fw_size, nread);
-				ret = FW_ERR_FILE_READ;
-				vfree(fw_data);
-				goto ERROR;
-			}
+			//Update fw
+			ret = mip4_ts_flash_fw(info, fw_data, fw_size, force, true, false);
 		}
 
-		ret = mip4_ts_flash_fw(info, fw_data, fw_size, force, true, false);
 		vfree(fw_data);
 	} else {
 		input_err(true, &info->client->dev, "%s [ERROR] fw_size [%zu]\n", __func__, fw_size);
 		ret = FW_ERR_FILE_READ;
 	}
 
-ERROR:
 	filp_close(fp, current->files);
 
+ERROR:
 	set_fs(old_fs);
 
-	/* Enable IRQ */
+	//Enable IRQ
 	enable_irq(info->client->irq);
 	mutex_unlock(&info->lock);
 
-	input_err(true, &info->client->dev, "%s [DONE]\n", __func__);
+	if (ret == 0)
+		input_err(true, &info->client->dev, "%s [DONE]\n", __func__);
+	else
+		input_err(true, &info->client->dev, "%s [ERROR] %d\n", __func__, ret);
 
 	return ret;
+}
+/**
+ * Getting firmware from air
+ */
+int mms_fw_update_from_ffu(struct mms_ts_info *info, bool force)
+{
+	const struct firmware *fw;
+	int retires = 3;
+	int ret;
+
+	input_info(true, &info->client->dev, "%s [START]\n", __func__);
+
+	//Disable IRQ
+	mutex_lock(&info->lock);
+	disable_irq(info->client->irq);
+	mms_clear_input(info);
+
+	//Get firmware
+	request_firmware(&fw, FFU_FW_PATH, &info->client->dev);
+
+	if (!fw) {
+		input_err(true, &info->client->dev, "%s [ERROR] request_firmware\n", __func__);
+		goto ERROR;
+	}
+
+	//Update fw
+	do {
+		ret = mip4_ts_flash_fw(info, fw->data, fw->size, force, true, false);
+		if (ret >= FW_ERR_NONE)
+			break;
+	} while (--retires);
+
+	if (!retires) {
+		input_err(true, &info->client->dev, "%s [ERROR] mms_flash_fw failed\n", __func__);
+		ret = -1;
+	}
+
+	release_firmware(fw);
+
+	//Enable IRQ
+	enable_irq(info->client->irq);
+	mutex_unlock(&info->lock);
+
+	if (ret < 0)
+		goto ERROR;
+
+	input_info(true, &info->client->dev, "%s [DONE]\n", __func__);
+	return 0;
+
+ERROR:
+	enable_irq(info->client->irq);
+	mutex_unlock(&info->lock);
+	input_err(true, &info->client->dev, "%s [ERROR]\n", __func__);
+	return -1;
 }
 
 #if MMS_USE_DEV_MODE
@@ -1233,7 +1067,7 @@ static ssize_t mms_sys_fw_update(struct device *dev,
 
 	input_info(true, &info->client->dev, "%s [START]\n", __func__);
 
-	ret = mms_fw_update_from_storage(info, true, NORMAL, TSP_PATH_EXTERNAL_FW);
+	ret = mms_fw_update_from_storage(info, true);
 
 	switch (ret) {
 	case FW_ERR_NONE:
@@ -1249,7 +1083,7 @@ static ssize_t mms_sys_fw_update(struct device *dev,
 		sprintf(data, "F/W update failed : File type error\n");
 		break;
 	case FW_ERR_FILE_OPEN:
-		sprintf(data, "F/W update failed : File open error [%s]\n", TSP_PATH_EXTERNAL_FW);
+		sprintf(data, "F/W update failed : File open error [%s]\n", EXTERNAL_FW_PATH);
 		break;
 	case FW_ERR_FILE_READ:
 		sprintf(data, "F/W update failed : File read error\n");
@@ -1321,30 +1155,11 @@ static int mms_init_config(struct mms_ts_info *info)
 		info->tkey_enable = true;
 #endif
 
-	/* read event format */
-#if 0
-	memset(rbuf, 0x00, sizeof(rbuf));
-	wbuf[0] = MIP_R0_EVENT;
-	wbuf[1] = MIP_R1_EVENT_FORMAT;
-	ret = mms_i2c_read(info, wbuf, 2, rbuf, 4);
-	if (ret == 1) {
-		input_info(true, &info->client->dev, "%s - read event format fail\n", __func__);
-		info->event_format = info->dtdata->event_format;
-		info->event_size = info->dtdata->event_size;
-		info->event_size_type = info->dtdata->event_size_type;
-	} else {
-		info->event_format = (int)(rbuf[0] | rbuf[1] << 8);
-		info->event_size = rbuf[2];
-		info->event_size_type = rbuf[3] & 0x1;
-	}
-#endif
-
 	info->event_format = info->dtdata->event_format;
 	info->event_size = info->dtdata->event_size;
-	info->event_size_type = info->dtdata->event_size_type;
 
-	input_info(true, &info->client->dev, "%s event_format[%d] event_size[%d] event_size_type[%d]\n",
-				__func__, info->event_format, info->event_size, info->event_size_type);
+	input_info(true, &info->client->dev, "%s event_format[%d] event_size[%d]\n",
+				__func__, info->event_format, info->event_size);
 
 	/* sponge fod info */
 	info->fod_tx = info->dtdata->fod_tx;
@@ -1414,6 +1229,7 @@ static void mms_run_rawdata(struct mms_ts_info *info, bool on_probe)
 	}
 
 out:
+	mms_reboot(info);
 	input_raw_info(true, &info->client->dev, "%s: done ##\n", __func__);
 	info->tsp_dump_lock = 0;
 }
@@ -1609,8 +1425,6 @@ static int mms_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	input_dev->open = mms_input_open;
 	input_dev->close = mms_input_close;
 #endif
-	INIT_DELAYED_WORK(&info->reset_work, mms_reset_work);
-
 	//set input event buffer size
 	input_set_events_per_packet(input_dev, 200);
 
@@ -1633,12 +1447,10 @@ static int mms_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		}
 	}
 
-	mutex_init(&info->modechange);
-
 	mms_power_control(info, 1);
 
 #if MMS_USE_AUTO_FW_UPDATE
-	ret = mms_fw_update_from_kernel(info, false, true);
+	ret = mms_fw_update_from_kernel(info, false);
 	if (ret) {
 		input_err(true, &client->dev, "%s [ERROR] mms_fw_update_from_kernel\n", __func__);
 		goto err_fw_update;
@@ -1676,7 +1488,7 @@ static int mms_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	trustedui_set_tsp_irq(info->irq);
-	input_err(true, &info->client->dev, "%s[%d] called!\n",
+	input_err(&client->dev, "%s[%d] called!\n",
 		__func__, info->irq);
 #endif
 
@@ -1725,6 +1537,7 @@ static int mms_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	INIT_DELAYED_WORK(&info->work_print_info, mms_ts_print_info_work);
 	INIT_DELAYED_WORK(&info->work_read_info, mms_read_info_work);
+	mutex_init(&info->modechange);
 	schedule_delayed_work(&info->work_read_info, msecs_to_jiffies(5000));
 
 	mutex_init(&info->sponge_mutex);
@@ -1799,9 +1612,9 @@ ERROR:
 }
 
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-void mms_trustedui_mode_on(void)
+void trustedui_mode_on(void)
 {
-	pr_err("%s, release all finger..\n", __func__);
+	input_err(&tui_tsp_info->client->dev, "%s, release all finger..\n",	__func__);
 	mms_clear_input(tui_tsp_info);
 }
 #endif
@@ -1832,7 +1645,7 @@ static int mms_remove(struct i2c_client *client)
 #endif
 	cancel_delayed_work_sync(&info->work_read_info);
 	cancel_delayed_work_sync(&info->work_print_info);
-	cancel_delayed_work_sync(&info->reset_work);
+	flush_delayed_work(&info->work_read_info);
 
 	if (info->dtdata->support_ear_detect) {
 		input_mt_destroy_slots(info->input_dev_proximity);

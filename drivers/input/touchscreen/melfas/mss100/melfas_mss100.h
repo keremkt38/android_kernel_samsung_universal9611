@@ -38,7 +38,6 @@
 #include <linux/regulator/consumer.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/kernel.h>
-#include <linux/spu-verify.h>
 
 #include "melfas_mss100_reg.h"
 
@@ -77,18 +76,14 @@ static struct delayed_work *p_ghost_check;
 #define GLOVE_MODE
 #define COVER_MODE
 
-#define MMS_DEVICE_NAME	"mss_ts"
+#define MMS_DEVICE_NAME	"mms_ts"
 #define MMS_CONFIG_DATE		{0x00, 0x00, 0x00, 0x00}
 #define CHIP_NAME "MSS100"
 
 //Config driver
 #define MMS_USE_INPUT_OPEN_CLOSE	1
 #define I2C_RETRY_COUNT			3
-#ifdef CONFIG_SEC_FACTORY
 #define RESET_ON_EVENT_ERROR		0
-#else
-#define RESET_ON_EVENT_ERROR		1
-#endif
 #define ESD_COUNT_FOR_DISABLE		7
 #define MMS_USE_TOUCHKEY		0
 
@@ -100,8 +95,6 @@ static struct delayed_work *p_ghost_check;
 
 #define TO_TOUCH_MODE		0
 #define TO_LOWPOWER_MODE		1
-
-#define TOUCH_RESET_DWORK_TIME		10
 
 //Features
 #define MMS_USE_NAP_MODE		0
@@ -134,10 +127,8 @@ static struct delayed_work *p_ghost_check;
 #define INPUT_PALM_MAX			1
 
 /* Firmware update */
-#define TSP_PATH_EXTERNAL_FW        "/sdcard/Firmware/TSP/tsp.bin"
-#define TSP_PATH_EXTERNAL_FW_SIGNED        "/sdcard/Firmware/TSP/tsp_signed.bin"
-#define TSP_PATH_SPU_FW_SIGNED            "/spu/TSP/ffu_tsp.bin"
-
+#define EXTERNAL_FW_PATH		"/sdcard/Firmware/TSP/melfas.bin"
+#define FFU_FW_PATH	"ffu_tsp.bin"
 #define MMS_USE_AUTO_FW_UPDATE		1
 #define MMS_FW_MAX_SECT_NUM		4
 #define MMS_FW_UPDATE_DEBUG		0
@@ -156,7 +147,7 @@ static struct delayed_work *p_ghost_check;
 #define EVENT_FORMAT_WITH_PRESSURE		3
 #define EVENT_FORMAT_KEY_ONLY 		4
 #define EVENT_FORMAT_WITH_PRESSURE_2BYTE	8
-#define EVENT_FORMAT_16BYTE			10
+
 /* vector id */
 #define VECTOR_ID_SCREEN_RX				1
 #define VECTOR_ID_SCREEN_TX				2
@@ -191,14 +182,6 @@ static struct delayed_work *p_ghost_check;
 #define MMS_GESTURE_CODE_PRESS		0x03
 #define MMS_GESTURE_CODE_SINGLE_TAP		0x04
 
-/**
- * proximity status bitmask
- */
-#define MMS_MODE_HOVER_1		(1 << 0)
-#define MMS_MODE_HOVER_2		(1 << 1)
-#define MMS_MODE_HOVER_3		(1 << 2)
-#define MMS_MODE_HOVER_LP		(1 << 3)
-
 /* MMS_GESTURE_ID */
 #define MMS_GESTURE_ID_AOD			0x00
 #define MMS_GESTURE_ID_DOUBLETAP_TO_WAKEUP	0x01
@@ -228,39 +211,31 @@ typedef enum {
 #define SPONGE_FOD_PROPERTY      0x14
 #define SPONGE_FOD_INFO			0x15
 #define SPONGE_FOD_POSITION			0x19
-#define SPONGE_FOD_RECT				0x4B
 #define SPONGE_LP_DUMP_REG_ADDR            0xF0
 #define SPONGE_DUMP_FORMAT_REG_OFFSET    (D_BASE_LP_DUMP_REG_ADDR + 0x00)
 #define SPONGE_DUMP_NUM_REG_OFFSET       (D_BASE_LP_DUMP_REG_ADDR + 0x01)
 #define SPONGE_DUMP_CUR_INDEX_REG_OFFSET (D_BASE_LP_DUMP_REG_ADDR + 0x02)
 #define SPONGE_DUMP_START                (D_BASE_LP_DUMP_REG_ADDR + 0x04)
 
-#define MMS_TS_COORDINATE_ACTION_NONE		0
-#define MMS_TS_COORDINATE_ACTION_PRESS		1
-#define MMS_TS_COORDINATE_ACTION_MOVE		2
-#define MMS_TS_COORDINATE_ACTION_RELEASE	3
+#define MMS_TS_COORDINATE_ACTION_RELEASE		0
+#define MMS_TS_COORDINATE_ACTION_PRESS_MOVE		1
+
+/*
+ * support_feature
+ * bit value should be made a promise with InputFramework.
+ */
+#define INPUT_FEATURE_ENABLE_SETTINGS_AOT	(1 << 0) /* Double tap wakeup settings */
+#define INPUT_FEATURE_ENABLE_PRESSURE		(1 << 1) /* homekey pressure */
+#define INPUT_FEATURE_ENABLE_SYNC_RR120		(1 << 2) /* sync reportrate 120hz */
 
 #define TWO_LEVEL_GRIP_CONCEPT
 #ifdef TWO_LEVEL_GRIP_CONCEPT
-#define MMS_CMD_EDGE_HANDLER 	0xAA
-#define MMS_CMD_EDGE_AREA		0xAB
-#define MMS_CMD_DEAD_ZONE		0xAC
-#define MMS_CMD_LANDSCAPE_MODE	0xAD
+#define SEC_TS_CMD_EDGE_HANDLER 	0xAA
+#define SEC_TS_CMD_EDGE_AREA		0xAB
+#define SEC_TS_CMD_DEAD_ZONE		0xAC
+#define SEC_TS_CMD_LANDSCAPE_MODE	0xAD
 
 #define DIFF_SCALER 1000
-
-#define TOUCHTYPE_NORMAL		0
-#define TOUCHTYPE_HOVER		1
-#define TOUCHTYPE_FLIPCOVER	2
-#define TOUCHTYPE_GLOVE		3
-#define TOUCHTYPE_STYLUS		4
-#define TOUCHTYPE_PALM		5
-#define TOUCHTYPE_WET		6
-#define TOUCHTYPE_PROXIMITY	7
-#define TOUCHTYPE_JIG		8
-
-#define OUT_POCKET 10
-#define IN_POCKET 11
 
 enum grip_write_mode {
 	G_NONE				= 0,
@@ -275,27 +250,6 @@ enum grip_set_data {
 	GRIP_ALL_DATA			= 1,
 };
 #endif
-
-enum cover_id {
-	SEC_FLIP_COVER = 0,
-	SEC_SVIEW_COVER,
-	SEC_COVER_NOTHING1,
-	SEC_SVIEW_WIRELESS,
-	SEC_HEALTH_COVER,
-	SEC_CHARGER_COVER,
-	SEC_VIEW_WALLET,
-	SEC_LED_COVER,
-	SEC_CLEAR_COVER,
-	SEC_QWERTY_KEYBOARD_KOR,
-	SEC_QWERTY_KEYBOARD_US,
-	SEC_NEON_COVER,
-	SEC_ALCANTARA_COVER,
-	SEC_GAMEPACK_COVER,
-	SEC_LED_BACK_COVER,
-	SEC_CLEAR_SIDE_VIEW_COVER,
-	SEC_MINI_SVIEW_WALLET_COVER,
-	SEC_MONTBLANC_COVER = 100,
-};
 
 struct mms_ts_coordinate {
 	u8 id;
@@ -340,8 +294,6 @@ struct mms_ts_info {
 	struct sec_cmd_data sec;
 
 	struct mms_ts_coordinate coord[MAX_FINGER_NUM];
-	volatile bool reset_is_on_going;
-	struct delayed_work reset_work;
 
 	int irq;
 	bool	 enabled;
@@ -362,7 +314,6 @@ struct mms_ts_info {
 	u16 fw_ver_bin[8];
 	u16 fw_model_ver_ic;
 	u8 event_size;
-	u8 event_size_type;
 	int event_format;
 	u16 fw_year;
 	u8 fw_month;
@@ -372,27 +323,14 @@ struct mms_ts_info {
 	unsigned char finger_state[MAX_FINGER_NUM];
 	int touch_count;
 
-	u8 fod_lp_mode;
 	u8 fod_tx;
 	u8 fod_rx;
 	u8 fod_vi_size;
-	u16 fod_rect_data[4];
-	u16 rect_data[4];
+	u8 fod_lp_mode;
 
-	u8 grip_edgehandler_direction;
-	int grip_edgehandler_start_y;
-	int grip_edgehandler_end_y;
-	u16 grip_edge_range;
-	u8 grip_deadzone_up_x;
-	u8 grip_deadzone_dn_x;
-	int grip_deadzone_y;
 	u8 grip_landscape_mode;
-	int grip_landscape_edge;
-	u16 grip_landscape_deadzone;
 	u16 grip_landscape_top_deadzone;
 	u16 grip_landscape_bottom_deadzone;
-	u16 grip_landscape_top_gripzone;
-	u16 grip_landscape_bottom_gripzone;
 
 	bool tkey_enable;
 
@@ -400,7 +338,6 @@ struct mms_ts_info {
 	u8 glove_mode;
 	u8 charger_mode;
 	u8 cover_mode;
-	u8 cover_type;
 
 	u8 esd_cnt;
 	bool disable_esd;
@@ -436,9 +373,6 @@ struct mms_ts_info {
 	struct delayed_work work_read_info;
 	bool info_work_done;
 
-#ifdef CONFIG_TOUCHSCREEN_MELFAS_MSS100_FOD_SUPPORT
-	bool fod_pressed;
-#endif
 	struct delayed_work work_print_info;
 	int noise_mode;
 	int wet_mode;
@@ -450,7 +384,6 @@ struct mms_ts_info {
 
 	long prox_power_off;
 	u8 ed_enable;
-	int pocket_enable;
 
 	int ic_status;
 	unsigned int scrub_id;
@@ -466,8 +399,6 @@ struct mms_ts_info {
 
 	u32 defect_probability;
 	u8 item_cmdata;
-	bool check_version;
-	u8 hover_event; /* keystring for protos */
 };
 
 enum IC_STATUS {
@@ -477,11 +408,6 @@ enum IC_STATUS {
 	LP_ENTER = 3,
 };
 
-enum FW_SIGN {
-	NORMAL = 0,
-	SIGNING = 1,
-};
-
 /**
  * Platform Data
  */
@@ -489,6 +415,8 @@ struct mms_devicetree_data {
 	int gpio_intr;
 	const char *gpio_vdd_en;
 	const char *gpio_io_en;
+	int gpio_sda;
+	int gpio_scl;
 	int bringup;
 	struct regulator *vdd_io;
 	const char *fw_name;
@@ -499,23 +427,15 @@ struct mms_devicetree_data {
 	bool support_fod;
 	bool enable_settings_aot;
 	bool sync_reportrate_120;
-	bool support_open_short_test;
 	bool no_vsync;
-	bool support_protos;
-	bool regulator_boot_on;
-	bool support_dual_fw;
-	bool support_model_feature;
 
 	int max_x;
 	int max_y;
-	int display_x;
-	int display_y;
 	int node_x;
 	int node_y;
 	int node_key;
 	int event_format;
 	int event_size;
-	int event_size_type;
 	int fod_tx;
 	int fod_rx;
 	int fod_vi_size;
@@ -589,7 +509,7 @@ enum flash_fail_type {
  * Declarations
  */
 //main
-void mms_power_reboot(struct mms_ts_info *info);
+void mms_reboot(struct mms_ts_info *info);
 int mms_i2c_read(struct mms_ts_info *info, char *write_buf, unsigned int write_len,
 			char *read_buf, unsigned int read_len);
 int mms_i2c_read_next(struct mms_ts_info *info, char *read_buf, int start_idx,
@@ -601,8 +521,8 @@ int mms_get_ready_status(struct mms_ts_info *info);
 int mms_get_fw_version(struct mms_ts_info *info, u8 *ver_buf);
 int mms_get_fw_version_u16(struct mms_ts_info *info, u16 *ver_buf_u16);
 int mms_disable_esd_alert(struct mms_ts_info *info);
-int mms_fw_update_from_kernel(struct mms_ts_info *info, bool force, bool on_probe);
-int mms_fw_update_from_storage(struct mms_ts_info *info, bool force, bool signing, const char *file_path);
+int mms_fw_update_from_kernel(struct mms_ts_info *info, bool force);
+int mms_fw_update_from_storage(struct mms_ts_info *info, bool force);
 int mms_fw_update_from_ffu(struct mms_ts_info *info, bool force);
 
 //mod
@@ -614,7 +534,6 @@ int mms_custom_event_handler(struct mms_ts_info *info, u8 *rbuf, u8 size);
 int sponge_read(struct mms_ts_info *info, u16 addr, u8 *buf, u8 len);
 int sponge_write(struct mms_ts_info *info, u16 addr, u8 *buf, u8 len);
 int mms_set_custom_library(struct mms_ts_info *info, u16 addr, u8 *buf, u8 len);
-int mms_set_fod_rect(struct mms_ts_info *info);
 
 #ifdef CONFIG_VBUS_NOTIFIER
 int mms_charger_attached(struct mms_ts_info *info, bool status);
@@ -625,7 +544,7 @@ int mms_parse_devicetree(struct device *dev, struct mms_ts_info *info);
 #endif
 void mms_config_input(struct mms_ts_info *info);
 int mms_lowpower_mode(struct mms_ts_info *info, u8 on);
-int mms_set_aod_rect(struct mms_ts_info *info);
+
 //fw_update
 int mip4_ts_flash_fw(struct mms_ts_info *info, const u8 *fw_data, size_t fw_size,
 			bool force, bool section, bool on_probe);
@@ -660,22 +579,11 @@ int mms_vbus_notification(struct notifier_block *nb,
 		unsigned long cmd, void *data);
 #endif
 
-#ifdef COVER_MODE
-int set_cover_type(struct mms_ts_info *info);
-#endif
-void set_grip_data_to_ic(struct mms_ts_info *info, u8 flag);
-int mms_reinit(struct mms_ts_info *info);
-
 void minority_report_calculate_cmdata(struct mms_ts_info *info);
 void minority_report_sync_latest_value(struct mms_ts_info *info);
 
 #ifdef CONFIG_SAMSUNG_LPM_MODE
 extern int poweroff_charging;
-#endif
-extern unsigned int lcdtype;
-
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-extern void mms_trustedui_mode_on(void);
 #endif
 
 #endif /* __MELFAS_MMS400_H */

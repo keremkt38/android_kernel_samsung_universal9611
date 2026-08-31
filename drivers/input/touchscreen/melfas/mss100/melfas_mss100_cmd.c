@@ -10,7 +10,7 @@
 
 #include "melfas_mss100.h"
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-#include <linux/t-base-tui.h>
+#include <linux/trustedui.h>
 #endif
 
 #if MMS_USE_CMD_MODE
@@ -86,17 +86,53 @@ static ssize_t read_support_feature(struct device *dev,
 	if (info->dtdata->sync_reportrate_120)
 		feature |= INPUT_FEATURE_ENABLE_SYNC_RR120;
 
-	if (info->dtdata->support_open_short_test)
-		feature |= INPUT_FEATURE_SUPPORT_OPEN_SHORT_TEST;
-
-	input_info(true, &info->client->dev, "%s: %d%s%s%s%s\n",
+	input_info(true, &info->client->dev, "%s: %d%s%s%s\n",
 			__func__, feature,
 			feature & INPUT_FEATURE_ENABLE_SETTINGS_AOT ? " aot" : "",
 			feature & INPUT_FEATURE_ENABLE_PRESSURE ? " pressure" : "",
-			feature & INPUT_FEATURE_ENABLE_SYNC_RR120 ? " RR120hz" : "",
-			feature & INPUT_FEATURE_SUPPORT_OPEN_SHORT_TEST ? " openshort" : "");
+			feature & INPUT_FEATURE_ENABLE_SYNC_RR120 ? " RR120hz" : "");
 
 	return snprintf(buf, SEC_CMD_BUF_SIZE, "%d", feature);
+}
+
+static ssize_t ear_detect_enable_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sec_cmd_data *sec = dev_get_drvdata(dev);
+	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
+
+	input_info(true, &info->client->dev, "%s: %d\n", __func__,
+			info->ed_enable);
+
+	return snprintf(buf, SEC_CMD_BUF_SIZE, "%d\n", info->ed_enable);
+}
+
+static ssize_t ear_detect_enable_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct sec_cmd_data *sec = dev_get_drvdata(dev);
+	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
+	long data;
+	int ret;
+	u8 wbuf[3];
+
+	ret = kstrtol(buf, 10, &data);
+	if (ret < 0)
+		return ret;
+
+	input_info(true, &info->client->dev, "%s: %ld\n", __func__, data);
+
+	info->ed_enable = data;
+
+	wbuf[0] = MIP_R0_CTRL;
+	wbuf[1] = MIP_R1_CTRL_PROXIMITY;
+	wbuf[2] = info->ed_enable;
+
+	if (mms_i2c_write(info, wbuf, 3))
+		input_err(true, &info->client->dev, "%s: failed to set ed_enable\n", __func__);
+
+	return count;
 }
 
 static ssize_t fod_position_show(struct device *dev,
@@ -146,62 +182,8 @@ static ssize_t fod_info_show(struct device *dev,
 	input_info(true, &info->client->dev, "%s: tx:%d, rx:%d, size:%d\n",
 			__func__, info->fod_tx, info->fod_rx, info->fod_vi_size);
 
-	return snprintf(buf, SEC_CMD_BUF_SIZE, "%d,%d,%d,%d,%d",
-		info->fod_tx, info->fod_rx, info->fod_vi_size, info->dtdata->node_x, info->dtdata->node_y);
+	return snprintf(buf, SEC_CMD_BUF_SIZE, "%d,%d,%d", info->fod_tx, info->fod_rx, info->fod_vi_size);
 }
-
-/** for protos **/
-static ssize_t protos_event_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct sec_cmd_data *sec = dev_get_drvdata(dev);
-	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
-
-	input_info(true, &info->client->dev, "%s: %d\n", __func__,
-			info->hover_event);
-
-	return snprintf(buf, SEC_CMD_BUF_SIZE, "%d", info->hover_event != 3 ? 0 : 3);
-}
-
-static ssize_t protos_event_store(struct device *dev,
-		struct device_attribute *attr,
-		const char *buf, size_t count)
-{
-	struct sec_cmd_data *sec = dev_get_drvdata(dev);
-	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
-	u8 data;
-	int ret;
-	u8 wbuf[3];
-
-	ret = kstrtou8(buf, 10, &data);
-	if (ret < 0)
-		return ret;
-
-	input_info(true, &info->client->dev, "%s: %d\n", __func__, data);
-
-	if (data != 0 && data != 1) {
-		input_err(true, &info->client->dev, "%s: incorrect data\n", __func__);
-		return -EINVAL;
-	}
-
-	wbuf[0] = MIP_R0_CTRL;
-	wbuf[1] = MIP_R1_CTRL_PROXIMITY;
-	wbuf[2] = data;
-
-	if (mms_i2c_write(info, wbuf, 3))
-		input_err(true, &info->client->dev, "%s: failed to set ed_enable\n", __func__);
-
-	return count;
-}
-
-#ifdef CONFIG_TOUCHSCREEN_MELFAS_MSS100_FOD_SUPPORT
-static ssize_t fod_pressed_show(struct device *dev, struct device_attribute *attr, char *buf) {
-	struct sec_cmd_data *sec = dev_get_drvdata(dev);
-	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
-
-	return snprintf(buf, PAGE_SIZE, "%u\n", info->fod_pressed);
-}
-#endif
 
 /**
  * Command : Update firmware
@@ -212,9 +194,17 @@ static void cmd_fw_update(void *device_data)
 	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
 	char buff[64] = { 0 };
 	int fw_location = 0;
-	int ret;
 
 	sec_cmd_set_default_result(sec);
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	if (sec->cmd_param[0] == 1) {
+		snprintf(buff, sizeof(buff), "%s", "OK");
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		input_info(true, &info->client->dev, "%s: user_ship, success\n", __func__);
+		return;
+	}
+#endif
 
 	if (info->ic_status == PWR_OFF) {
 		input_err(true, &info->client->dev, "%s: Touch is stopped!\n", __func__);
@@ -235,26 +225,17 @@ static void cmd_fw_update(void *device_data)
 	 * 3 : [FFU] Getting firmware from air.
 	 */
 
-	info->check_version = false;
-
 	switch (fw_location) {
 	case 0:
-		if (mms_fw_update_from_kernel(info, true, false))
+		if (mms_fw_update_from_kernel(info, true))
 			goto ERROR;
 		break;
 	case 1:
-#ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
-		info->check_version = true;
-		ret = mms_fw_update_from_storage(info, false, SIGNING, TSP_PATH_EXTERNAL_FW_SIGNED);
-#else
-		ret = mms_fw_update_from_storage(info, true, NORMAL, TSP_PATH_EXTERNAL_FW);
-#endif
-		if (ret < 0)
+		if (mms_fw_update_from_storage(info, true))
 			goto ERROR;
 		break;
 	case 3:
-		ret = mms_fw_update_from_storage(info, false, SIGNING, TSP_PATH_SPU_FW_SIGNED);
-		if (ret < 0)
+		if (mms_fw_update_from_ffu(info, true))
 			goto ERROR;
 		break;
 	default:
@@ -1605,64 +1586,45 @@ out:
 #endif
 
 #ifdef COVER_MODE
-int set_cover_type(struct mms_ts_info *info) {
-
-	u8 wbuf[4];
-
-	switch (info->cover_type) {
-	case SEC_MINI_SVIEW_WALLET_COVER:
-		break;
-	default:
-		info->cover_type = 0;
-		break;
-	}
-
-	input_info(true, &info->client->dev, "%s: cover state, %d %d\n",
-		__func__, info->cover_mode, info->cover_type);
-
-	wbuf[0] = MIP_R0_CTRL;
-	wbuf[1] = MIP_R1_CTRL_COVER_MODE;
-	wbuf[2] = info->cover_mode;
-	wbuf[3] = info->cover_type;
-
-	if (mms_i2c_write(info, wbuf, 4)) {
-		input_err(true, &info->client->dev, "%s [ERROR] mms_i2c_write\n", __func__);
-		return -EIO;
-	}
-
-	return 0;
-}
-
 static void clear_cover_mode(void *device_data)
 {
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
 	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
 	char buff[64] = { 0 };
-	int ret;
+	int enable = sec->cmd_param[0];
+	u8 wbuf[4];
 
 	sec_cmd_set_default_result(sec);
 
-	if (sec->cmd_param[0] < 0 || sec->cmd_param[0] > 3) {
+	input_info(true, &info->client->dev, "%s %d\n", __func__, enable);
+
+	if (!info->enabled) {
+		input_err(true, &info->client->dev,
+			"%s : tsp disabled\n", __func__);
+		snprintf(buff, sizeof(buff), "%s", "NG");
 		goto out;
-	} else {
-		if (sec->cmd_param[0] > 1) {
-			info->cover_mode = 1;
-			info->cover_type = sec->cmd_param[1];
-		} else {
-			info->cover_mode = 0;
-			info->cover_type = 0;
-		}
-
-		if (!info->enabled) {
-			input_err(true, &info->client->dev,
-				"%s : tsp disabled\n", __func__);
-			goto out;
-		}
-
-		ret = set_cover_type(info);
-		if (ret < 0)
-			goto out;
 	}
+
+	wbuf[0] = MIP_R0_CTRL;
+	wbuf[1] = MIP_R1_CTRL_WINDOW_MODE;
+	wbuf[2] = enable;
+
+	if ((enable >= 0) || (enable <= 3)) {
+		if (mms_i2c_write(info, wbuf, 3)) {
+			input_err(true, &info->client->dev, "%s [ERROR] mms_i2c_write\n", __func__);
+			goto out;
+		} else{
+			input_info(true, &info->client->dev, "%s - value[%d]\n", __func__, wbuf[2]);
+		}
+	} else {
+		input_err(true, &info->client->dev, "%s [ERROR] Unknown value[%d]\n", __func__, enable);
+		goto out;
+	}
+
+	if (enable > 0)
+		info->cover_mode = true;
+	else
+		info->cover_mode = false;
 
 	input_dbg(true, &info->client->dev, "%s [DONE]\n", __func__);
 
@@ -1679,131 +1641,48 @@ out:
 }
 #endif
 
-/*
- *	flag     1  :  set edge handler
- *		2  :  set (portrait, normal) edge zone data
- *		4  :  set (portrait, normal) dead zone data
- *		8  :  set landscape mode data
- *		16 :  mode clear
- *	data
- *		0xAA, FFF (y start), FFF (y end),  FF(direction)
- *		0xAB, FFFF (edge zone)
- *		0xAC, FF (up x), FF (down x), FFFF (y)
- *		0xAD, FF (mode), FFF (edge), FFF (dead zone x), FF (dead zone top y), FF (dead zone bottom y)
- *	case
- *		edge handler set :  0xAA....
- *		booting time :  0xAA...  + 0xAB...
- *		normal mode : 0xAC...  (+0xAB...)
- *		landscape mode : 0xAD...
- *		landscape -> normal (if same with old data) : 0xAD, 0
- *		landscape -> normal (etc) : 0xAC....  + 0xAD, 0
- */
-void set_grip_data_to_ic(struct mms_ts_info *info, u8 flag)
+#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
+static void tui_mode_cmd(struct mms_ts_info *info)
 {
-	u8 data[17] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
+	char buff[16] = "TUImode:FAIL";
 
-	input_info(true, &info->client->dev, "%s: flag: %02X (clr,lan,nor,edg,han)\n", __func__, flag);
+	sec_cmd_set_default_result(sec);
+	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
 
-	if (flag & G_SET_EDGE_HANDLER) {
-		if (info->grip_edgehandler_direction == 0) {
-			data[0] = MIP_R0_CUSTOM;
-			data[1] = MIP_R1_SEC_EDGE_HANDLER;
-			data[2] = 0x0;
-			data[3] = 0x0;
-			data[4] = 0x0;
-			data[5] = 0x0;
-		} else {
-			data[0] = MIP_R0_CUSTOM;
-			data[1] = MIP_R1_SEC_EDGE_HANDLER;
-			data[2] = info->grip_edgehandler_direction & 0x3;
-			data[3] = info->grip_edgehandler_start_y & 0xFF;
-			data[4] = info->grip_edgehandler_end_y & 0xFF;
-			data[5] = (((info->grip_edgehandler_end_y >> 8)  & 0xF) << 4) | ((info->grip_edgehandler_start_y >> 8) & 0xF);
-		}
-		mms_i2c_write(info, data, 6);
-		input_info(true, &info->client->dev, "%s: 0x%02X %02X,%02X,%02X,%02X\n",
-				__func__, MIP_R1_SEC_EDGE_HANDLER, data[2], data[3], data[4], data[5]);
+	sec->cmd_state = SEC_CMD_STATUS_WAITING;
+	input_err(&info->client->dev, "%s: %s(%d)\n", __func__, buff,
+		  (int)strnlen(buff, sizeof(buff)));
+}
+#endif
+
+void set_grip_data_to_ic(struct mms_ts_info *info)
+{
+	u8 data[7] = { 0 };
+
+	data[0] = MIP_R0_CUSTOM;
+	data[1] = MIP_R1_SEC_GRIP_EDGE_HANDLER_TOP_BOTTOM;
+	data[2] = info->grip_landscape_mode;
+	if (info->grip_landscape_mode == 1) {
+		data[3] = info->grip_landscape_top_deadzone & 0xFF;
+		data[4] = (info->grip_landscape_top_deadzone >> 8) & 0xFF;
+		data[5] = info->grip_landscape_bottom_deadzone & 0xFF;
+		data[6] = (info->grip_landscape_bottom_deadzone >> 8) & 0xFF;
 	}
-
-	if (flag & G_SET_EDGE_ZONE) {
-		data[0] = MIP_R0_CUSTOM;
-		data[1] = MIP_R1_SEC_EDGE_AREA;
-		data[2] = info->grip_edge_range  & 0xFF;
-		data[3] = (info->grip_edge_range >> 8) & 0xFF;
-		mms_i2c_write(info, data, 4);
-		input_info(true, &info->client->dev, "%s: 0x%02X %02X,%02X\n",
-				__func__, MIP_R1_SEC_EDGE_AREA, data[2], data[3]);
-	}
-
-	if (flag & G_SET_NORMAL_MODE) {
-		data[0] = MIP_R0_CUSTOM;
-		data[1] = MIP_R1_SEC_DEAD_ZONE;
-		data[2] = info->grip_deadzone_y & 0xFF;
-		data[3] = (info->grip_deadzone_y >> 8) & 0xFF;
-		data[4] = info->grip_deadzone_up_x & 0xFF;
-		data[5] = (info->grip_deadzone_up_x >> 8 & 0xFF);
-		data[6] = info->grip_deadzone_dn_x & 0xFF;
-		data[7] = (info->grip_deadzone_dn_x >> 8 & 0xFF);
-
-		mms_i2c_write(info, data, 8);
-		input_info(true, &info->client->dev, "%s: 0x%02X %02X,%02X,%02X,%02X,%02X,%02X\n",
-				__func__, MIP_R1_SEC_DEAD_ZONE, data[2], data[3], data[4], data[5],
-				data[6],data[7],data[8]);
-
-		data[1] = MIP_R1_SEC_DEAD_ZONE_ENABLE;
-		data[2] = 0x1;
-
-		mms_i2c_write(info, data, 3);
-		input_info(true, &info->client->dev, "%s: 0x%02X %02X,%02X\n",
-				__func__, MIP_R1_SEC_DEAD_ZONE_ENABLE, data[1], data[2]);
-	}
-
-	if (flag & G_SET_LANDSCAPE_MODE) {
-		data[0] = MIP_R0_CUSTOM;
-		data[1] = MIP_R1_SEC_LANDSCAPE_MODE;
-		data[2] = info->grip_landscape_deadzone & 0xFF;
-		data[3] = (info->grip_landscape_deadzone >> 8) & 0xFF;
-		data[4] = info->grip_landscape_edge & 0xFF;
-		data[5] = (info->grip_landscape_edge >> 8) & 0xFF;
-		data[6] = info->grip_landscape_mode & 0x1;
-		data[7] = 0x0;
-		data[8] = 0x1;
-		data[9] = info->grip_landscape_top_deadzone & 0xFF;
-		data[10] = (info->grip_landscape_top_deadzone >> 8) & 0xFF;
-		data[11] = info->grip_landscape_bottom_deadzone & 0xFF;
-		data[12] = (info->grip_landscape_bottom_deadzone >> 8) & 0xFF;
-		data[13] = info->grip_landscape_top_gripzone & 0xFF;
-		data[14] = (info->grip_landscape_top_gripzone >> 8) & 0xFF;
-		data[15] = info->grip_landscape_bottom_gripzone & 0xFF;
-		data[16] = (info->grip_landscape_bottom_gripzone >> 8) & 0xFF;
-		
-
-		mms_i2c_write(info, data, 17);
-		input_info(true, &info->client->dev, "%s: 0x%02X %02X,%02X,%02X,%02X, %02X,%02X,%02X,%02X,%02X,%02X,%02X"
-			"%02X,%02X,%02X,%02X \n",
-				__func__, MIP_R1_SEC_LANDSCAPE_MODE, data[2], data[3], data[4],
-				data[5], data[6], data[7], data[8], data[9], data[10], data[11], data[12],
-				data[13], data[14], data[15], data[16]);
-	}
-
-	if (flag & G_CLR_LANDSCAPE_MODE) {
-		data[0] = MIP_R0_CUSTOM;
-		data[1] = MIP_R1_SEC_LANDSCAPE_MODE_CLR;
-		data[2] = info->grip_landscape_mode;
-		data[3] = 0x0;
-		data[4] = 0x0;
-		mms_i2c_write(info, data, 5);
-		input_info(true, &info->client->dev, "%s: 0x%02X %02X,%02X,%02X\n",
-				__func__, MIP_R1_SEC_LANDSCAPE_MODE_CLR, data[2], data[3], data[4]);
-	}
+	
+	mms_i2c_write(info, data, 7);
+	input_info(true, &info->client->dev, "%s: top bottom %02X,%02X,%02X,%02X\n",
+			__func__, data[3], data[4], data[5], data[6]);
 }
 
+/*
+ * only support tom bottom for letter box
+ */
 static void set_grip_data(void *device_data)
 {
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
 	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
 	char buff[SEC_CMD_STR_LEN] = { 0 };
-	u8 mode = G_NONE;
 
 	sec_cmd_set_default_result(sec);
 
@@ -1811,56 +1690,19 @@ static void set_grip_data(void *device_data)
 
 	mutex_lock(&info->lock);
 
-	if (sec->cmd_param[0] == 0) {	// edge handler
-		if (sec->cmd_param[1] == 0) {	// clear
-			info->grip_edgehandler_direction = 0;
-		} else if (sec->cmd_param[1] < 3) {
-			info->grip_edgehandler_direction = sec->cmd_param[1];
-			info->grip_edgehandler_start_y = sec->cmd_param[2];
-			info->grip_edgehandler_end_y = sec->cmd_param[3];
-		} else {
-			input_err(true, &info->client->dev, "%s: cmd1 is abnormal, %d (%d)\n",
-					__func__, sec->cmd_param[1], __LINE__);
-			goto err_grip_data;
-		}
-
-		mode = mode | G_SET_EDGE_HANDLER;
-		set_grip_data_to_ic(info, mode);
-
-	} else if (sec->cmd_param[0] == 1) {	// normal mode
-		if (info->grip_edge_range != sec->cmd_param[1])
-			mode = mode | G_SET_EDGE_ZONE;
-
-		info->grip_edge_range = sec->cmd_param[1];
-		info->grip_deadzone_up_x = sec->cmd_param[2];
-		info->grip_deadzone_dn_x = sec->cmd_param[3];
-		info->grip_deadzone_y = sec->cmd_param[4];
-		mode = mode | G_SET_NORMAL_MODE;
-
-		if (info->grip_landscape_mode == 1) {
+	if (sec->cmd_param[0] == 2) {	// landscape mode
+		if (sec->cmd_param[1] == 0) {	// normal mode
 			info->grip_landscape_mode = 0;
-			mode = mode | G_CLR_LANDSCAPE_MODE;
-		}
-		set_grip_data_to_ic(info, mode);
-	} else if (sec->cmd_param[0] == 2) {	// landscape mode
-		if (sec->cmd_param[1] == 0) {	// normal mode 
-			info->grip_landscape_mode = 0; // need to add melfas 
-			mode = mode | G_CLR_LANDSCAPE_MODE;
 		} else if (sec->cmd_param[1] == 1) {
 			info->grip_landscape_mode = 1;
-			info->grip_landscape_edge = sec->cmd_param[2];
-			info->grip_landscape_deadzone	= sec->cmd_param[3];
 			info->grip_landscape_top_deadzone = sec->cmd_param[4];
 			info->grip_landscape_bottom_deadzone = sec->cmd_param[5];
-			info->grip_landscape_top_gripzone = sec->cmd_param[6];
-			info->grip_landscape_bottom_gripzone = sec->cmd_param[7];
-			mode = mode | G_SET_LANDSCAPE_MODE;
 		} else {
-			input_err(true, &info->client->dev, "%s: cmd1 is abnormal, %d (%d)\n",
-					__func__, sec->cmd_param[1], __LINE__);
+			input_err(true, &info->client->dev, "%s: cmd1 is abnormal, %d\n",
+					__func__, sec->cmd_param[1]);
 			goto err_grip_data;
 		}
-		set_grip_data_to_ic(info, mode);
+		set_grip_data_to_ic(info);
 	} else {
 		input_err(true, &info->client->dev, "%s: cmd0 is abnormal, %d", __func__, sec->cmd_param[0]);
 		goto err_grip_data;
@@ -1881,82 +1723,6 @@ err_grip_data:
 	sec->cmd_state = SEC_CMD_STATUS_FAIL;
 	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
 	sec_cmd_set_cmd_exit(sec);
-}
-
-static void pocket_mode_enable(void *device_data)
-{
-	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
-	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
-	char buff[64] = { 0 };
-	u8 wbuf[3] = {0};
-
-	sec_cmd_set_default_result(sec);
-
-	if (!info->dtdata->support_protos) {
-		input_err(true, &info->client->dev,
-			"%s : not support protos\n", __func__);
-		goto out;
-	}
-
-	info->pocket_enable = sec->cmd_param[0];
-
-	wbuf[0] = MIP_R0_CTRL;
-	wbuf[1] = MIP_R1_CTRL_POCKET_MODE;
-	wbuf[2] = info->pocket_enable;
-
-	if (mms_i2c_write(info, wbuf, 3)) {
-		input_err(true, &info->client->dev, "%s: failed to set pocket mode enable\n", __func__);
-		goto out;
-	}
-
-	snprintf(buff, sizeof(buff), "%s", "OK");
-	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
-	sec->cmd_state = SEC_CMD_STATUS_OK;
-	sec_cmd_set_cmd_exit(sec);
-	return;
-
-out:
-	snprintf(buff, sizeof(buff), "%s", "NG");
-	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
-	sec->cmd_state = SEC_CMD_STATUS_FAIL;
-	sec_cmd_set_cmd_exit(sec);
-
-	input_info(true, &info->client->dev, "%s: %s\n", __func__, buff);
-}
-
-static void ear_detect_enable(void *device_data)
-{
-	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
-	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
-	char buff[64] = { 0 };
-	u8 wbuf[3];
-
-	sec_cmd_set_default_result(sec);
-
-	info->ed_enable = sec->cmd_param[0];
-
-	wbuf[0] = MIP_R0_CTRL;
-	wbuf[1] = MIP_R1_CTRL_PROXIMITY;
-	wbuf[2] = info->ed_enable;
-
-	if (mms_i2c_write(info, wbuf, 3)) {
-		input_err(true, &info->client->dev, "%s: failed to set ed_enable\n", __func__);
-		goto out;
-	}
-
-	snprintf(buff, sizeof(buff), "%s", "OK");
-	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
-	sec->cmd_state = SEC_CMD_STATUS_OK;
-	sec_cmd_set_cmd_exit(sec);
-	return;
-
-out:
-	snprintf(buff, sizeof(buff), "%s", "NG");
-	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
-	sec->cmd_state = SEC_CMD_STATUS_FAIL;
-	sec_cmd_set_cmd_exit(sec);
-
-	input_info(true, &info->client->dev, "%s: %s\n", __func__, buff);
 }
 
 static void fod_lp_mode(void *device_data)
@@ -2035,75 +1801,6 @@ out:
 	sec_cmd_set_cmd_exit(sec);
 
 	input_info(true, &info->client->dev, "%s: %s\n", __func__, buff);
-}
-
-int mms_set_fod_rect(struct mms_ts_info *info)
-{
-	int i, ret;
-	u8 data[8];
-	u32 sum = 0;
-
-	for (i = 0; i < 4; i++) {
-		data[i * 2] = info->fod_rect_data[i] & 0xFF;
-		data[i * 2 + 1] = (info->fod_rect_data[i] >> 8) & 0xFF;
-		sum += info->fod_rect_data[i];
-	}
-
-	if (!sum) /* no data */
-		return 0;
-
-	input_info(true, &info->client->dev, "%s: l:%d, t:%d, r:%d, b:%d\n",
-			__func__, info->fod_rect_data[0], info->fod_rect_data[1],
-			info->fod_rect_data[2], info->fod_rect_data[3]);
-
-	ret = mms_set_custom_library(info, SPONGE_FOD_RECT, data, sizeof(data));
-	if (ret < 0)
-		input_err(true, &info->client->dev, "%s: failed. ret: %d\n", __func__, ret);
-
-	return ret;
-}
-
-static void set_fod_rect(void *device_data)
-{
-	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
-	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
-	char buff[SEC_CMD_STR_LEN] = { 0 };
-	int i, ret;
-
-	sec_cmd_set_default_result(sec);
-
-	if (sec->cmd_param[0] > info->dtdata->display_x
-			|| sec->cmd_param[1] > info->dtdata->display_y
-			|| sec->cmd_param[2] > info->dtdata->display_x
-			|| sec->cmd_param[3] > info->dtdata->display_y) {
-		input_err(true, &info->client->dev, "%s: Abnormal fod_rect data\n", __func__);
-		goto NG;
-	}
-
-	input_info(true, &info->client->dev, "%s: l:%d, t:%d, r:%d, b:%d\n",
-			__func__, sec->cmd_param[0], sec->cmd_param[1],
-			sec->cmd_param[2], sec->cmd_param[3]);
-
-	for (i = 0; i < 4; i++)
-		info->fod_rect_data[i] = sec->cmd_param[i];
-
-	ret = mms_set_fod_rect(info);
-	if (ret < 0) {
-		input_err(true, &info->client->dev, "%s: failed. ret: %d\n", __func__, ret);
-		goto NG;
-	}
-
-	snprintf(buff, sizeof(buff), "OK");
-	sec->cmd_state = SEC_CMD_STATUS_OK;
-	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
-	sec_cmd_set_cmd_exit(sec);
-	return;
-NG:
-
-	snprintf(buff, sizeof(buff), "NG");
-	sec->cmd_state = SEC_CMD_STATUS_FAIL;
-	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
-	sec_cmd_set_cmd_exit(sec);
 }
 
 static void aot_enable(void *device_data)
@@ -2313,29 +2010,12 @@ out:
 	input_info(true, &info->client->dev, "%s: %s\n", __func__, buff);
 }
 
-int mms_set_aod_rect(struct mms_ts_info *info)
-{
-	u8 data[11] = {0};
-	int i;
-	int ret;
-
-	for (i = 0; i < 4; i++) {
-		data[i * 2] = info->rect_data[i] & 0xFF;
-		data[i * 2 + 1] = (info->rect_data[i] >> 8) & 0xFF;
-	}
-
-	ret = mms_set_custom_library(info, SPONGE_TOUCHBOX_W_OFFSET, data, 8);
-	if (ret < 0)
-		input_err(true, &info->client->dev, "%s: fail set custom lib \n", __func__);
-
-	return ret;
-}
-
 static void set_aod_rect(void *device_data)
 {
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
 	struct mms_ts_info *info = container_of(sec, struct mms_ts_info, sec);
 	char buff[64] = { 0 };
+	u8 data[11] = {0};
 	int i;
 	int ret;
 
@@ -2354,15 +2034,16 @@ static void set_aod_rect(void *device_data)
 			__func__, sec->cmd_param[0], sec->cmd_param[1],
 			sec->cmd_param[2], sec->cmd_param[3]);
 
-	for (i = 0; i < 4; i++)
-		info->rect_data[i] = sec->cmd_param[i];
-
-	ret = mms_set_aod_rect(info);
-	if (ret < 0) {
-		input_err(true, &info->client->dev, "%s: fail set aod rect \n", __func__);
-		goto out;
+	for (i = 0; i < 4; i++) {
+		data[i * 2] = sec->cmd_param[i] & 0xFF;
+		data[i * 2 + 1] = (sec->cmd_param[i] >> 8) & 0xFF;
 	}
 
+	ret = mms_set_custom_library(info, SPONGE_TOUCHBOX_W_OFFSET, data, 8);
+	if (ret < 0) {
+		input_err(true, &info->client->dev, "%s: fail set custom lib \n", __func__);
+		goto out;
+	}
 	enable_irq(info->client->irq);
 
 	snprintf(buff, sizeof(buff), "%s", "OK");
@@ -2486,15 +2167,17 @@ static void factory_cmd_result_all(void *device_data)
 	if (!info->dtdata->no_vsync)
 		cmd_run_test_vsync(sec);
 
-	disable_irq(info->client->irq);
-	mms_power_reboot(info);
-	enable_irq(info->client->irq);
+	mms_reboot(info);
 
 	sec->cmd_all_factory_state = SEC_CMD_STATUS_OK;
 
 out:
 	input_info(true, &info->client->dev, "%s: %d%s\n", __func__, sec->item_count, sec->cmd_result_all);
 }
+
+#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
+static void tui_mode_cmd(struct mms_ts_info *info);
+#endif
 
 /**
  * List of command functions
@@ -2549,9 +2232,6 @@ static struct sec_cmd sec_cmds[] = {
 	{SEC_CMD_H("aot_enable", aot_enable),},
 	{SEC_CMD("fod_enable", fod_enable),},
 	{SEC_CMD_H("fod_lp_mode", fod_lp_mode),},
-	{SEC_CMD_H("set_fod_rect", set_fod_rect),},
-	{SEC_CMD_H("ear_detect_enable", ear_detect_enable),},
-	{SEC_CMD_H("pocket_mode_enable", pocket_mode_enable),},
 	{SEC_CMD("set_aod_rect", set_aod_rect),},
 	{SEC_CMD("get_aod_rect", get_aod_rect),},
 	{SEC_CMD("set_grip_data", set_grip_data),},
@@ -2802,12 +2482,9 @@ static DEVICE_ATTR(vendor, S_IRUGO, read_vendor_show, NULL);
 static DEVICE_ATTR(sensitivity_mode, S_IRUGO | S_IWUSR | S_IWGRP, sensitivity_mode_show, sensitivity_mode_store);
 static DEVICE_ATTR(prox_power_off, 0664, prox_power_off_show, prox_power_off_store);
 static DEVICE_ATTR(support_feature, 0444, read_support_feature, NULL);
+static DEVICE_ATTR(ear_detect_enable, 0664, ear_detect_enable_show, ear_detect_enable_store);
 static DEVICE_ATTR(fod_pos, 0444, fod_position_show, NULL);
 static DEVICE_ATTR(fod_info, 0444, fod_info_show, NULL);
-static DEVICE_ATTR(virtual_prox, 0664, protos_event_show, protos_event_store);
-#ifdef CONFIG_TOUCHSCREEN_MELFAS_MSS100_FOD_SUPPORT
-static DEVICE_ATTR(fod_pressed, 0444, fod_pressed_show, NULL);
-#endif
 
 /**
  * Sysfs - cmd attr info
@@ -2822,12 +2499,9 @@ static struct attribute *mms_cmd_attr[] = {
 	&dev_attr_get_lp_dump.attr,
 	&dev_attr_support_feature.attr,
 	&dev_attr_prox_power_off.attr,
+	&dev_attr_ear_detect_enable.attr,
 	&dev_attr_fod_pos.attr,
 	&dev_attr_fod_info.attr,
-	&dev_attr_virtual_prox.attr,
-#ifdef CONFIG_TOUCHSCREEN_MELFAS_MSS100_FOD_SUPPORT
-	&dev_attr_fod_pressed.attr,
-#endif
 	NULL,
 };
 

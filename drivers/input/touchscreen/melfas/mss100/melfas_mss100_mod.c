@@ -25,7 +25,6 @@ int mms_power_control(struct mms_ts_info *info, int enable)
 	struct regulator *regulator_avdd = NULL;
 	struct pinctrl_state *pinctrl_state;
 	static bool on;
-	static bool first_flag = true;
 
 	input_info(true, &info->client->dev, "%s [START %s]\n",
 			__func__, enable ? "on":"off");
@@ -94,14 +93,10 @@ out:
 	if (!IS_ERR_OR_NULL(regulator_avdd))
 		regulator_put(regulator_avdd);
 
-	if (!first_flag || !info->dtdata->regulator_boot_on) {
-		if (!enable)
-			usleep_range(10 * 1000, 11 * 1000);
-		else
-			msleep(90);
-	}
-
-	first_flag = false;
+	if (!enable)
+		usleep_range(10 * 1000, 11 * 1000);
+	else
+		msleep(90);
 
 	input_info(true, &info->client->dev, "%s [DONE %s]\n",
 			__func__, enable ? "on":"off");
@@ -282,15 +277,7 @@ void mms_input_event_handler(struct mms_ts_info *info, u8 sz, u8 *buf)
 	int touch_major = 0;
 	int touch_minor = 0;
 	char location[6] = { 0, };
-/*	char pos[5];*/
-	int eid = 0;
-	int noise_level = 0;
-	int max_strength = 0;
-	int max_energy = 0;
-	int locate_area = 0;
-	int hover_id_num = 0;
-	int virtual_key_info = 0;
-	int touch_type = -1;
+	char pos[5];
 
 	input_dbg(false, &client->dev, "%s [START]\n", __func__);
 	input_dbg(false, &client->dev, "%s - sz[%d] buf[0x%02X]\n", __func__, sz, buf[0]);
@@ -308,9 +295,6 @@ void mms_input_event_handler(struct mms_ts_info *info, u8 sz, u8 *buf)
 		case EVENT_FORMAT_WITH_PRESSURE:
 		case EVENT_FORMAT_WITH_PRESSURE_2BYTE:
 			type = (packet[0] & 0xF0) >> 4;
-			break;
-		case EVENT_FORMAT_16BYTE:
-			type = (packet[0] & 0x03);
 			break;
 		case EVENT_FORMAT_KEY_ONLY:
 			type = MIP4_EVENT_INPUT_TYPE_KEY;
@@ -378,32 +362,9 @@ void mms_input_event_handler(struct mms_ts_info *info, u8 sz, u8 *buf)
 				touch_major = packet[10];
 				touch_minor = packet[11];
 				break;
-			case EVENT_FORMAT_16BYTE:
-				id = ((packet[0] >> 2) & 0x0F) - 1;
-				state = packet[0] >> 6;
-				eid = packet[0] & 0x03;
-				x = (packet[1] << 4) | ((packet[3] >> 4) & 0x0F);
-				y = (packet[2] << 4) | (packet[3] & 0x0F);
-				pressure = z =  packet[6] & 0x3F;
-				touch_major = packet[4];
-				touch_minor = packet[5];
-				touch_type = ((packet[6] >> 4) & 0x0C) | (packet[7] >> 6);
-				max_energy = (packet[7] & 0x20) >> 5; /* not used */
-				noise_level = packet[8];
-				max_strength = packet[9];
-				locate_area = (packet[10] & 0xF0) >> 4; /* not used */
-				hover_id_num = packet[10] & 0x0F;
-				virtual_key_info = packet[11];
-				palm = (touch_type == TOUCHTYPE_PALM);
-				break;
 			default:
 				input_err(true, &client->dev, "%s [ERROR] Unknown event format [%d]\n", __func__, info->event_format);
 				goto error;
-			}
-
-			if (id >= MAX_FINGER_NUM) {
-				input_err(true, &client->dev, "%s [ERROR] id error [%d]\n", __func__, id);
-				continue;
 			}
 
 			info->coord[id].action = state;
@@ -413,56 +374,52 @@ void mms_input_event_handler(struct mms_ts_info *info, u8 sz, u8 *buf)
 			info->coord[id].major = touch_major;
 			info->coord[id].minor = touch_minor;
 			info->coord[id].palm = palm;
-			/*info->coord[id].type = touch_type;*/
+			info->coord[id].type = palm;
 
-			if ((state == MMS_TS_COORDINATE_ACTION_RELEASE) ||
-				(state == MMS_TS_COORDINATE_ACTION_NONE)) {
-
-				if ((state == 0) && (info->event_format == EVENT_FORMAT_16BYTE)) {
-					input_info(false, &client->dev, "%s state = 0 , no event: 0x%02x\n", __func__, state);
-				} else {			
-					/* Release */
-					input_mt_slot(info->input_dev, id);
+			if (state == MMS_TS_COORDINATE_ACTION_RELEASE) {
+				/* Release */
+				input_mt_slot(info->input_dev, id);
 #ifdef CONFIG_SEC_FACTORY
-					input_report_abs(info->input_dev, ABS_MT_PRESSURE, 0);
+				input_report_abs(info->input_dev, ABS_MT_PRESSURE, 0);
 #endif
-					input_mt_report_slot_state(info->input_dev,
-									MT_TOOL_FINGER, false);
-					if (info->finger_state[id] != 0) {
-						info->touch_count--;
-						if (!info->touch_count) {
-							input_report_key(info->input_dev, BTN_TOUCH, 0);
-							input_report_key(info->input_dev,
-										BTN_TOOL_FINGER, 0);
-							info->check_multi = 0;
-							info->print_info_cnt_release = 0;
-						}
-						info->finger_state[id] = 0;
+				input_mt_report_slot_state(info->input_dev,
+								MT_TOOL_FINGER, false);
+				if (info->finger_state[id] != 0) {
+					info->touch_count--;
+					if (!info->touch_count) {
+						input_report_key(info->input_dev, BTN_TOUCH, 0);
+						input_report_key(info->input_dev,
+									BTN_TOOL_FINGER, 0);
+						info->check_multi = 0;
+						info->print_info_cnt_release = 0;
+					}
+					info->finger_state[id] = 0;
 
-						mms_ts_location_detect(info, location, info->coord[id].x, info->coord[id].y);
+					mms_ts_location_detect(info, location, info->coord[id].x, info->coord[id].y);
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
-						input_info(true, &info->client->dev,
-								"[R] tID:%d loc:%s dd:%d,%d mc:%d tc:%d\n",
-								id, location,
-								info->coord[id].x - info->coord[id].p_x,
-								info->coord[id].y - info->coord[id].p_y,
-								info->coord[id].mcount, info->touch_count);
+					input_info(true, &info->client->dev,
+							"[R] tID:%d loc:%s dd:%d,%d mc:%d tc:%d | ed:%d\n",
+							id, location,
+							info->coord[id].x - info->coord[id].p_x,
+							info->coord[id].y - info->coord[id].p_y,
+							info->coord[id].mcount, info->touch_count,
+							info->ed_enable);
 
 #else
-						input_info(true, &info->client->dev,
-								"[R] tID:%d loc:%s dd:%d,%d mc:%d tc:%d lx:%d ly:%d\n",
-								id, location,
-								info->coord[id].x - info->coord[id].p_x,
-								info->coord[id].y - info->coord[id].p_y,
-								info->coord[id].mcount, info->touch_count,
-								info->coord[id].x, info->coord[id].y);
+					input_info(true, &info->client->dev,
+							"[R] tID:%d loc:%s dd:%d,%d mc:%d tc:%d lx:%d ly:%d | ed:%d\n",
+							id, location,
+							info->coord[id].x - info->coord[id].p_x,
+							info->coord[id].y - info->coord[id].p_y,
+							info->coord[id].mcount, info->touch_count,
+							info->coord[id].x, info->coord[id].y,
+							info->ed_enable);
 #endif
-						info->coord[id].mcount = 0;
-					}
+					info->coord[id].mcount = 0;
 				}
+
 				continue;
-			} else if ((state == MMS_TS_COORDINATE_ACTION_PRESS) ||
-				(state == MMS_TS_COORDINATE_ACTION_MOVE)) {
+			} else if (state == MMS_TS_COORDINATE_ACTION_PRESS_MOVE) {
 				/* Press or Move */
 				input_mt_slot(info->input_dev, id);
 				input_mt_report_slot_state(info->input_dev, MT_TOOL_FINGER, true);
@@ -478,7 +435,7 @@ void mms_input_event_handler(struct mms_ts_info *info, u8 sz, u8 *buf)
 #endif
 				input_report_abs(info->input_dev, ABS_MT_TOUCH_MAJOR, touch_major);
 				input_report_abs(info->input_dev, ABS_MT_TOUCH_MINOR, touch_minor);
-				input_report_abs(info->input_dev, ABS_MT_PALM, info->coord[id].palm);
+				input_report_abs(info->input_dev, ABS_MT_PALM, palm);
 				if (info->finger_state[id] == 0) {
 					info->finger_state[id] = 1;
 					info->touch_count++;
@@ -489,21 +446,19 @@ void mms_input_event_handler(struct mms_ts_info *info, u8 sz, u8 *buf)
 					mms_ts_location_detect(info, location, info->coord[id].x, info->coord[id].y);
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
 					input_info(true, &info->client->dev,
-							"[P] tID:%d.%d z:%d major:%d minor:%d loc:%s tc:%d p:%d nlvl:%d maxS:%d hid:%d\n",
+							"[P] tID:%d.%d z:%d major:%d minor:%d loc:%s tc:%d\n",
 							id, (info->input_dev->mt->trkid - 1) & TRKID_MAX,
 							info->coord[id].z,
 							info->coord[id].major, info->coord[id].minor,
-							location, info->touch_count, info->coord[id].palm,
-							noise_level, max_strength, hover_id_num);
+							location, info->touch_count);
 
 #else
 					input_info(true, &info->client->dev,
-							"[P] tID:%d.%d x:%d y:%d z:%d major:%d minor:%d loc:%s tc:%d p:%d nlvl:%d maxS:%d hid:%d\n",
+							"[P] tID:%d.%d x:%d y:%d z:%d major:%d minor:%d loc:%s tc:%d\n",
 							id, (info->input_dev->mt->trkid - 1) & TRKID_MAX,
 							info->coord[id].x, info->coord[id].y, info->coord[id].z,
 							info->coord[id].major, info->coord[id].minor,
-							location, info->touch_count, info->coord[id].palm,
-							noise_level, max_strength, hover_id_num);
+							location, info->touch_count);
 #endif
 					if ((info->touch_count > 2) && (info->check_multi == 0)) {
 						info->check_multi = 1;
@@ -513,7 +468,7 @@ void mms_input_event_handler(struct mms_ts_info *info, u8 sz, u8 *buf)
 				info->coord[id].mcount++;
 			}
 
-/*			if (state == MMS_TS_COORDINATE_ACTION_RELEASE)
+			if (state == MMS_TS_COORDINATE_ACTION_RELEASE)
 				snprintf(pos, 5, "R");
 			if (state == MMS_TS_COORDINATE_ACTION_PRESS_MOVE) {
 				if (info->finger_state[id] == 0)
@@ -527,7 +482,7 @@ void mms_input_event_handler(struct mms_ts_info *info, u8 sz, u8 *buf)
 						__func__, id, finger_mode[info->coord[id].pre_type],
 						finger_mode[info->coord[id].type], pos);
 
-			info->coord[id].pre_type = info->coord[id].type;*/
+			info->coord[id].pre_type = info->coord[id].type;
 
 		} else if (type == MIP4_EVENT_INPUT_TYPE_KEY) {
 			int key_code;
@@ -559,23 +514,21 @@ void mms_input_event_handler(struct mms_ts_info *info, u8 sz, u8 *buf)
 					__func__, id, key_code, state);
 			}
 		} else if (type == MIP4_EVENT_INPUT_TYPE_PROXIMITY) {
-			if(info->dtdata->support_model_feature) { /* support events for firmware unchanged hover event types */
-				int hover_id;
-				int hover_state = 0;
+			int hover_id;
+			int hover_state = 0;
 
-				for (hover_id = 1; hover_id < 4; hover_id++) {
-					if (packet[1] & (0x01 << (hover_id + 1)))
-						hover_state = hover_id;
-				}
+			for (hover_id = 1; hover_id < 4; hover_id++) {
+				if (packet[1] & (0x01 << (hover_id + 1)))
+					hover_state = hover_id;
+			}
 
-				if (info->dtdata->support_ear_detect && info->ed_enable) {
-					if (info->ic_status >= LP_MODE) {
-						input_info(true, &client->dev, "%s: LPM : SKIP HOVER DETECT(%d)\n", __func__, hover_state);
-					} else {
-						input_info(true, &client->dev, "%s: HOVER DETECT(%d)\n", __func__, hover_state);
-						input_report_abs(info->input_dev_proximity, ABS_MT_CUSTOM, hover_state);
-						input_sync(info->input_dev_proximity);
-					}
+			if (info->dtdata->support_ear_detect && info->ed_enable) {
+				if (info->ic_status >= LP_MODE) {
+					input_info(true, &client->dev, "%s: LPM : SKIP HOVER DETECT(%d)\n", __func__, hover_state);
+				} else {
+					input_info(true, &client->dev, "%s: HOVER DETECT(%d)\n", __func__, hover_state);
+					input_report_abs(info->input_dev_proximity, ABS_MT_CUSTOM, hover_state);
+					input_sync(info->input_dev_proximity);
 				}
 			}
 		}
@@ -636,9 +589,9 @@ int mms_custom_event_handler(struct mms_ts_info *info, u8 *rbuf, u8 size)
 				input_sync(info->input_dev);
 			} else if (gesture_id == MMS_GESTURE_ID_DOUBLETAP_TO_WAKEUP) {
 				input_info(true, &info->client->dev, "%s: AOT\n", __func__);
-				input_report_key(info->input_dev, KEY_WAKEUP, 1);
+				input_report_key(info->input_dev, KEY_HOMEPAGE, 1);
 				input_sync(info->input_dev);
-				input_report_key(info->input_dev, KEY_WAKEUP, 0);
+				input_report_key(info->input_dev, KEY_HOMEPAGE, 0);
 			}
 		} else if (gesture_type == MMS_GESTURE_CODE_SINGLE_TAP) {
 			info->scrub_id = SPONGE_EVENT_TYPE_SINGLE_TAP;
@@ -651,19 +604,11 @@ int mms_custom_event_handler(struct mms_ts_info *info, u8 *rbuf, u8 size)
 			if (gesture_id == MMS_GESTURE_ID_FOD_LONG || gesture_id == MMS_GESTURE_ID_FOD_NORMAL) {
 				info->scrub_id = SPONGE_EVENT_TYPE_FOD;
 				input_info(true, &info->client->dev, "%s: FOD: %s\n", __func__, gesture_id ? "normal" : "long");
-#ifdef CONFIG_TOUCHSCREEN_MELFAS_MSS100_FOD_SUPPORT
-				info->fod_pressed = true;
-				sysfs_notify(&info->sec.fac_dev->kobj, NULL, "fod_pressed");
-#endif
 				input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 1);
 				input_sync(info->input_dev);
 			} else if (gesture_id == MMS_GESTURE_ID_FOD_RELEASE) {
 				info->scrub_id = SPONGE_EVENT_TYPE_FOD_RELEASE;
 				input_info(true, &info->client->dev, "%s: FOD release\n", __func__);
-#ifdef CONFIG_TOUCHSCREEN_MELFAS_MSS100_FOD_SUPPORT
-				info->fod_pressed = false;
-				sysfs_notify(&info->sec.fac_dev->kobj, NULL, "fod_pressed");
-#endif
 				input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 1);
 				input_sync(info->input_dev);
 			} else if (gesture_id == MMS_GESTURE_ID_FOD_OUT) {
@@ -674,6 +619,7 @@ int mms_custom_event_handler(struct mms_ts_info *info, u8 *rbuf, u8 size)
 			}
 		}
 	}
+
 	input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 0);
 	input_sync(info->input_dev);
 
@@ -698,6 +644,11 @@ int mms_parse_devicetree(struct device *dev, struct mms_ts_info *info)
 	gpio_direction_input(info->dtdata->gpio_intr);
 	info->client->irq = gpio_to_irq(info->dtdata->gpio_intr);
 
+	info->dtdata->gpio_scl = of_get_named_gpio(np, "melfas,scl-gpio", 0);
+	gpio_request(info->dtdata->gpio_scl, "melfas_scl_gpio");
+	info->dtdata->gpio_sda = of_get_named_gpio(np, "melfas,sda-gpio", 0);
+	gpio_request(info->dtdata->gpio_sda, "melfas_sda_gpio");
+
 	if (of_property_read_string(np, "melfas,vdd_en", &info->dtdata->gpio_vdd_en))
 		input_err(true, dev,  "Failed to get regulator_dvdd name property\n");
 
@@ -713,17 +664,6 @@ int mms_parse_devicetree(struct device *dev, struct mms_ts_info *info)
 		info->dtdata->max_y = tmp[1];
 	}
 
-	if (of_property_read_u32_array(np, "melfas,display_resolution", tmp, 2)) {
-		input_err(true, dev,
-				"%s: display_resolution is not set. set to same as max_coords\n",
-				__func__);
-		info->dtdata->display_x = info->dtdata->max_x;
-		info->dtdata->display_y = info->dtdata->max_y;
-	} else {
-		info->dtdata->display_x = tmp[0];
-		info->dtdata->display_y = tmp[1];
-	}
-
 	if (of_property_read_u32_array(np, "melfas,node_info", tmp, 3)){
 		input_info(true, dev, "Failed to get node_info\n");
 	} else {
@@ -732,16 +672,15 @@ int mms_parse_devicetree(struct device *dev, struct mms_ts_info *info)
 		info->dtdata->node_key = tmp[2];
 	}
 
-	if (of_property_read_u32_array(np, "melfas,event_info", tmp, 3)){
+	if (of_property_read_u32_array(np, "melfas,event_info", tmp, 2)){
 		input_info(true, dev, "Failed to get event_info\n");
 	} else {
 		info->dtdata->event_format = tmp[0];
 		info->dtdata->event_size = tmp[1];
-		info->dtdata->event_size_type = tmp[2];
 	}
-	input_info(true, dev, "%s : max_x:%d, max_y:%d, display:%d,%d, node_x:%d, node_y:%d, node_key:%d, event_format:%d, event_size:%d/%d\n",
-		__func__, info->dtdata->max_x, info->dtdata->max_y, info->dtdata->display_x, info->dtdata->display_y, info->dtdata->node_x, info->dtdata->node_y,
-		info->dtdata->node_key, info->dtdata->event_format, info->dtdata->event_size, info->dtdata->event_size_type);
+	input_info(true, dev, "%s : max_x:%d, max_y:%d, node_x:%d, node_y:%d, node_key:%d, event_format:%d, event_size:%d\n",
+		__func__, info->dtdata->max_x, info->dtdata->max_y, info->dtdata->node_x, info->dtdata->node_y,
+		info->dtdata->node_key, info->dtdata->event_format, info->dtdata->event_size);
 
 	if (of_property_read_u32_array(np, "melfas,fod_info", tmp, 3)){
 		input_info(true, dev, "Failed to get fod_info\n");
@@ -757,9 +696,6 @@ int mms_parse_devicetree(struct device *dev, struct mms_ts_info *info)
 	if (of_property_read_u32(np, "melfas,bringup", &info->dtdata->bringup) < 0)
 		info->dtdata->bringup = 0;
 
-	if (of_property_read_string(np, "melfas,fw_name_old", &info->dtdata->fw_name_old))
-		input_err(true, dev, "Failed to get fw_name property\n");
-
 	if (of_property_read_string(np, "melfas,fw_name", &info->dtdata->fw_name))
 		input_err(true, dev, "Failed to get fw_name property\n");
 
@@ -768,17 +704,7 @@ int mms_parse_devicetree(struct device *dev, struct mms_ts_info *info)
 	info->dtdata->support_fod = of_property_read_bool(np, "support_fod");	
 	info->dtdata->enable_settings_aot = of_property_read_bool(np, "enable_settings_aot");
 	info->dtdata->sync_reportrate_120 = of_property_read_bool(np, "sync-reportrate-120");
-	info->dtdata->support_open_short_test = of_property_read_bool(np, "support_open_short_test");
 	info->dtdata->no_vsync = of_property_read_bool(np, "melfas,no_vsync");
-	info->dtdata->support_protos = of_property_read_bool(np, "melfas,support_protos");
-	info->dtdata->regulator_boot_on = of_property_read_bool(np, "melfas,regulator_boot_on");
-	info->dtdata->support_dual_fw = of_property_read_bool(np, "melfas,support_dual_fw");
-	info->dtdata->support_model_feature = of_property_read_bool(np, "melfas,support_model_feature");
-
-	if (info->dtdata->support_dual_fw) {
-		if ((lcdtype >> 4) == 0x80004) /* old 80 00 4X   new 80 00 8X*/
-			info->dtdata->fw_name = info->dtdata->fw_name_old;
-	}
 
 	if (of_property_read_u32_array(np, "melfas,area-siz", px_zone, 3)){
 		input_info(true, dev, "Failed to get zone's size\n");
@@ -793,9 +719,10 @@ int mms_parse_devicetree(struct device *dev, struct mms_ts_info *info)
 	input_info(true, dev, "%s : zone's size - indicator:%d, navigation:%d, edge:%d\n",
 		__func__, info->dtdata->area_indicator, info->dtdata->area_navigation ,info->dtdata->area_edge);
 
-	input_info(true, dev, "%s: fw_name %s int:%d irq:%d support_LPM:%d AOT:%d FOD:%d ED:%d ProTos:%d\n",
-		__func__, info->dtdata->fw_name, info->dtdata->gpio_intr, info->client->irq, info->dtdata->support_lpm,
-		info->dtdata->enable_settings_aot, info->dtdata->support_fod, info->dtdata->support_ear_detect, info->dtdata->support_protos);
+	input_info(true, dev, "%s: fw_name %s int:%d irq:%d sda:%d scl:%d support_LPM:%d AOT:%d FOD:%d ED:%d\n",
+		__func__, info->dtdata->fw_name, info->dtdata->gpio_intr, info->client->irq, info->dtdata->gpio_sda,
+		info->dtdata->gpio_scl, info->dtdata->support_lpm, info->dtdata->enable_settings_aot,
+		info->dtdata->support_fod, info->dtdata->support_ear_detect);
 
 	return 0;
 }
@@ -840,7 +767,7 @@ void mms_config_input(struct mms_ts_info *info)
 	set_bit(EV_KEY, input_dev->evbit);
 	set_bit(KEY_POWER, input_dev->keybit);
 #endif
-	set_bit(KEY_WAKEUP, input_dev->keybit);
+	set_bit(KEY_HOMEPAGE, input_dev->keybit);
 	set_bit(KEY_BLACK_UI_GESTURE, input_dev->keybit);
 	input_dbg(true, &info->client->dev, "%s [DONE]\n", __func__);
 }
@@ -956,11 +883,8 @@ int mms_lowpower_mode(struct mms_ts_info *info, u8 on)
 		return -EINVAL;
 	}
 
-	if (on == TO_LOWPOWER_MODE) {
+	if (on == TO_LOWPOWER_MODE)
 		info->ic_status = LP_ENTER;
-		mms_set_custom_library(info, SPONGE_AOD_ENABLE_OFFSET, &(info->lowpower_flag), 1);
-		mms_set_utc_sponge(info);
-	}
 
 	wbuf[0] = MIP_R0_CTRL;
 	wbuf[1] = MIP_R1_CTRL_PROX_OFF;
@@ -974,21 +898,15 @@ int mms_lowpower_mode(struct mms_ts_info *info, u8 on)
 		input_err(true, &info->client->dev, "%s [ERROR] write power mode %s\n",
 				__func__, on ? "LP" : "NP");
 
-	mms_clear_input(info);
-
-	if (device_may_wakeup(&info->client->dev)) {
-		if (on)
-			enable_irq_wake(info->client->irq);
-		else
-			disable_irq_wake(info->client->irq);
+	if (on == TO_LOWPOWER_MODE) {
+		mms_set_custom_library(info, SPONGE_AOD_ENABLE_OFFSET, &(info->lowpower_flag), 1);
+		mms_set_utc_sponge(info);
+		info->ic_status = LP_MODE;
+	} else {
+		info->ic_status = PWR_ON;
 	}
 
-	if (on)
-		info->ic_status = LP_MODE;
-	else
-		info->ic_status = PWR_ON;
-
-	input_info(true, &info->client->dev, "%s: %s mode_flag:%x prox_power:%d ed:%d pocket:%d\n",
-		__func__, on ? "LPM" : "normal", info->lowpower_flag, info->prox_power_off, info->ed_enable, info->pocket_enable);
+	input_info(true, &info->client->dev, "%s: %s mode flag %x  prox power %d\n", __func__,
+									on ? "LPM" : "normal", info->lowpower_flag, info->prox_power_off);
 	return 0;
 }

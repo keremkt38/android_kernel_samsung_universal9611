@@ -352,6 +352,7 @@ int mip4_ts_flash_fw(struct mms_ts_info *info, const u8 *fw_data, size_t fw_size
 	u8 tail_mark[4] = MELFAS_BIN_TAIL_MARK;
 	u8 ver_chip[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 	u8 ecc_error[4] = ISC_ECC_ERROR;
+	u8 fw_uptodate = 0;
 	int i;
 
 	input_dbg(false, &info->client->dev, "%s [START]\n", __func__);
@@ -415,9 +416,7 @@ int mip4_ts_flash_fw(struct mms_ts_info *info, const u8 *fw_data, size_t fw_size
 			if (!mms_get_fw_version(info, ver_chip)) {
 				break;
 			} else {
-				disable_irq(info->client->irq);
-				mms_power_reboot(info);
-				enable_irq(info->client->irq);
+				mms_reboot(info);
 			}
 		}
 		if (retry <= 0) {
@@ -449,31 +448,12 @@ int mip4_ts_flash_fw(struct mms_ts_info *info, const u8 *fw_data, size_t fw_size
 				input_err(true, &info->client->dev, "%s: crc error\n", __func__);
 				goto update;
 			}
-#ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
-			if (info->check_version) {
-				if ((bin_info->version[4] == ver_chip[4]) && (bin_info->version[5] == ver_chip[5])) { /* user ship ums update */
-					input_err(true, &info->client->dev, "%s: force update\n", __func__);
-					goto update;
-				} else {
-					input_err(true, &info->client->dev, "%s: do not matched project version\n", __func__);
-					ret = FW_ERR_UPTODATE;
-					goto error_update;
-				}
-			}
-#endif
+
 			for (i = 4; i < 7; i++) {
 				if (bin_info->version[i] != ver_chip[i]) {
-					
-					if (i == 5) { 
-						input_err(true, &info->client->dev, "%s: do not matched project version - force update.\n", __func__);
+					if (i == 5) {
+						input_err(true, &info->client->dev, "%s: do not matched project version\n", __func__);
 						goto update;
-					}
-
-					if (info->dtdata->support_dual_fw) {/* for panel recovery */
-						if (i == 6) {
-							input_err(true, &info->client->dev, "%s: do not matched panel version - force update.\n", __func__);
-							goto update;
-						}
 					}
 					input_err(true, &info->client->dev, "%s: do not matched version info\n", __func__);
 					ret = FW_ERR_UPTODATE;
@@ -481,11 +461,8 @@ int mip4_ts_flash_fw(struct mms_ts_info *info, const u8 *fw_data, size_t fw_size
 				}
 			}
 
-			if (bin_info->version[7] <= ver_chip[7]) {
-				input_info(true, &info->client->dev, "%s - Chip firmware is already up-to-date\n", __func__);
-				ret = FW_ERR_UPTODATE;
-				goto error_update;
-			}
+			if (bin_info->version[7] <= ver_chip[7]) 
+				fw_uptodate = 1;
 		}
 	}
 
@@ -508,8 +485,16 @@ update:
 		}
 		input_info(true, &info->client->dev, "%s - ECC [0x%02X%02X%02X%02X]\n", __func__, rbuf[0], rbuf[1], rbuf[2], rbuf[3]);
 
-		if (memcmp(ecc_error, rbuf, 4) == 0)
+		if (memcmp(ecc_error, rbuf, 4) == 0) {
 			input_info(true, &info->client->dev, "%s - ECC error\n", __func__);
+		} else {
+			/* Check version */
+			if (fw_uptodate == 1) {
+				input_info(true, &info->client->dev, "%s - Chip firmware is already up-to-date\n", __func__);
+				ret = FW_ERR_UPTODATE;
+				goto uptodate;
+			}
+		}
 	}
 
 	/* Erase */
@@ -556,6 +541,7 @@ update:
 		addr -= ISC_PAGE_SIZE;
 	}
 
+uptodate:
 	/* Exit ISC mode */
 	input_dbg(false, &info->client->dev, "%s - Exit ISC mode\n", __func__);
 	isc_exit(info);
@@ -575,12 +561,6 @@ update:
 	}
 
 	kfree(bin_data);
-
-	if (!on_probe) {
-		ret = mms_reinit(info);
-		if (ret < 0)
-			input_info(true, &info->client->dev, "%s: failed\n", __func__);
-	}
 
 	input_dbg(false, &info->client->dev, "%s [DONE]\n", __func__);
 	goto exit;

@@ -942,7 +942,7 @@ EXIT:
 	}
 
 	if (ret)
-		mms_power_reboot(info);
+		mms_reboot(info);
 
 	enable_irq(info->client->irq);
 
@@ -1164,7 +1164,7 @@ EXIT:
 	}
 
 	if (ret)
-		mms_power_reboot(info);
+		mms_reboot(info);
 
 	//exit
 	mutex_lock(&info->lock);
@@ -1418,7 +1418,7 @@ static ssize_t mms_sys_reboot(struct device *dev,
 
 	disable_irq(info->irq);
 	mms_clear_input(info);
-	mms_power_reboot(info);
+	mms_reboot(info);
 	enable_irq(info->irq);
 
 	sprintf(data, "Reboot\n");
@@ -1565,7 +1565,7 @@ static ssize_t mms_sys_window_mode_store(struct device *dev,
 	input_dbg(true, &info->client->dev, "%s [START]\n", __func__);
 
 	wbuf[0] = MIP_R0_CTRL;
-	wbuf[1] = MIP_R1_CTRL_COVER_MODE;
+	wbuf[1] = MIP_R1_CTRL_WINDOW_MODE;
 	wbuf[2] = buf[0];
 
 	if ((buf[0] == 0) || (buf[0] == 1)) {
@@ -1598,7 +1598,7 @@ static ssize_t mms_sys_window_mode_show(struct device *dev,
 	input_dbg(true, &info->client->dev, "%s [START]\n", __func__);
 
 	wbuf[0] = MIP_R0_CTRL;
-	wbuf[1] = MIP_R1_CTRL_COVER_MODE;
+	wbuf[1] = MIP_R1_CTRL_WINDOW_MODE;
 
 	if (mms_i2c_read(info, wbuf, 2, rbuf, 1)) {
 		input_err(true, &info->client->dev, "%s [ERROR] mms_i2c_read\n", __func__);
