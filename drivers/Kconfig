@@ -234,7 +234,7 @@ source "drivers/sensorhub/Kconfig"
 
 source "drivers/gps/Kconfig"
 
-source "drivers/vibrator/Kconfig"
+source "drivers/motor/Kconfig"
 
 source "drivers/fingerprint/Kconfig"
 

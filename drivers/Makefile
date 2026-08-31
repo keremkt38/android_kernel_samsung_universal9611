@@ -207,7 +207,7 @@ obj-$(CONFIG_SENSORS_SSP) += sensorhub/
 obj-$(CONFIG_UH)		+= uh/
 
 # vibrator
-obj-y				+= vibrator/
+obj-y				+= motor/
 
 # Fingerprint
 obj-$(CONFIG_SENSORS_FINGERPRINT) += fingerprint/
