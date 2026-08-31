@@ -22,7 +22,7 @@ struct mms_ts_info *tui_tsp_info;
 #ifdef CONFIG_SAMSUNG_TUI
 struct mms_ts_info *tsp_info;
 #endif
-
+#include <linux/spu-verify.h>
 /**
  * Reboot chip
  *
