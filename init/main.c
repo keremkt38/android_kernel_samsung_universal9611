@@ -94,9 +94,6 @@
 #include <asm/sections.h>
 #include <asm/cacheflush.h>
 
-#define CREATE_TRACE_POINTS
-#include <trace/events/initcall.h>
-
 #ifdef CONFIG_SEC_EXT
 #include <linux/sec_ext.h>
 #endif
@@ -113,6 +110,9 @@
 #include <linux/defex.h>
 void __init __weak defex_load_rules(void) { }
 #endif
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/initcall.h>
 
 static int kernel_init(void *);
 

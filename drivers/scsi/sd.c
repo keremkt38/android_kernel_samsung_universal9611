@@ -3856,7 +3856,6 @@ static void sd_shutdown(struct device *dev)
 	struct scsi_device *sdp = to_scsi_device(dev);
 	struct request_queue *q = sdp->request_queue;
 	unsigned long flags;
-	if (system_state != SYSTEM_RUNNING) return;
 
 	if (!sdkp)
 		return;         /* this can happen */

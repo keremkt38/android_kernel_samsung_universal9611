@@ -15,6 +15,10 @@
 #include <asm/pgtable.h>
 #include <linux/uaccess.h>
 
+#ifdef CONFIG_FIVE
+static struct task_integrity init_integrity =
+					INIT_TASK_INTEGRITY(init_integrity);
+#endif
 static struct signal_struct init_signals = {
 	.nr_threads	= 1,
 	.thread_head	= LIST_HEAD_INIT(init_task.thread_node),
@@ -131,6 +135,7 @@ struct task_struct init_task
 	INIT_NUMA_BALANCING(init_task)
 	INIT_KASAN(init_task)
 	INIT_LIVEPATCH(init_task)
+	INIT_INTEGRITY(tsk)
 	INIT_TASK_SECURITY
 };
 
