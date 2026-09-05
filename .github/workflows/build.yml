@@ -1,0 +1,50 @@
+name: Kernel Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Repo'yu klonla
+      uses: actions/checkout@v4
+      with:
+          fetch-depth: 10
+    - name: Gerekli bağımlılıkları yükle
+      run: |
+        sudo apt update
+        sudo apt install -y bc bison flex libssl-dev make \
+          python3 python-is-python3 git zip unzip \
+          ccache libncurses5-dev libncursesw5-dev \
+          clang lld llvm llvm-dev wget curl
+
+    - name: Kernel build et
+      run: |
+        
+        chmod +x build.sh
+        ./build.sh
+
+    - name: AnyKernel3 indir ve paketle
+      run: |
+        git clone https://github.com/SamsungProject1/AnyKernel3.git
+        
+        OUT_NAME="EverlineX_m30s_${{ github.run_number }}"
+
+        # Kernel image kopyala
+        cp AK3/Image AnyKernel3/
+        
+        cd AnyKernel3
+        zip -r "${OUT_NAME}.zip" ./*
+        cd ..
+
+    
+
+    - name: Telegram'a gönder
+      run: |
+        FILE="AnyKernel3/EverlineX_m30s_${{ github.run_number }}.zip"
+
+        curl -F document=@"$FILE" \
+             -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+             https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
