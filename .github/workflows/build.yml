@@ -28,13 +28,13 @@ jobs:
 
     - name: AnyKernel3 indir ve paketle
       run: |
-        git clone https://github.com/SamsungProject1/AnyKernel3.git
+        git clone https://github.com/keremkt38/AnyKernel3.git
         
         OUT_NAME="EverlineX_m30s_${{ github.run_number }}"
 
         # Kernel image kopyala
         cp AK3/Image AnyKernel3/
-        
+        cp AK3/dtb.img AnyKernel3/
         cd AnyKernel3
         zip -r "${OUT_NAME}.zip" ./*
         cd ..
