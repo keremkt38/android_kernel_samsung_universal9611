@@ -2,8 +2,8 @@
 
 echo -e "\n[INFO]: BUILD STARTED..!\n"
 
-#init submodules
-#git submodule init && git submodule update
+# init submodules
+# git submodule init && git submodule update
 
 export KERNEL_ROOT="$(pwd)"
 export ARCH=arm64
@@ -43,7 +43,7 @@ if [ ! -f ".requirements" ]; then
 fi
 mkdir -p "${KERNEL_ROOT}/out" "${KERNEL_ROOT}/build" "${HOME}/toolchains"
 
-#init neutron-clang
+# init neutron-clang
 if [ ! -d "${HOME}/toolchains/neutron-clang" ]; then
     echo -e "\n[INFO] Cloning Neutron-Clang Toolchain\n"
     mkdir -p "${HOME}/toolchains/neutron-clang" && cd "${HOME}/toolchains/neutron-clang"
@@ -52,7 +52,7 @@ if [ ! -d "${HOME}/toolchains/neutron-clang" ]; then
     cd "${KERNEL_ROOT}"
 fi
 
-#init arm gnu toolchain
+# init arm gnu toolchain
 if [ ! -d "${HOME}/toolchains/gcc" ]; then
     echo -e "\n[INFO] Cloning ARM GNU Toolchain\n"
     mkdir -p "${HOME}/toolchains/gcc" && cd "${HOME}/toolchains/gcc"
@@ -93,19 +93,40 @@ export BUILD_OPTIONS=(
 )
 
 build_kernel(){
-    # Make default configuration.
-    # Replace 'your_defconfig' with the name of your kernel's defconfig
-    make "${BUILD_OPTIONS[@]}" exynos9611-m30s_defconfig 
+    # 1. Defconfig uygula
+    make "${BUILD_OPTIONS[@]}" exynos9611-m30s_defconfig || exit 1
+
+    # 2. Önce Device Tree Blob'ları (DTB) derle
+    echo -e "\n[INFO]: Building Device Tree Blobs (dtbs)...\n"
+    make "${BUILD_OPTIONS[@]}" dtbs || exit 1
+
+    # 3. Derlenen .dtb dosyalarını mkdtboimg.py'nin bulabilmesi için kök dizine kopyala
+    echo -e "\n[INFO]: Copying compiled DTBs for image creation...\n"
+    cp "${KERNEL_ROOT}/out/arch/arm64/boot/dts/exynos/"*.dtb "${KERNEL_ROOT}/" 2>/dev/null || true
+
+    # 4. dtb.img oluştur
+    echo -e "\n[INFO]: Building DTB image...\n"
+    python3 "${KERNEL_ROOT}/mkdtboimg.py" cfg_create \
+        "${KERNEL_ROOT}/out/arch/arm64/boot/dtb.img" \
+        "${KERNEL_ROOT}/exynos9610.cfg" \
+        --dtb-dir "${KERNEL_ROOT}/out/arch/arm64/boot/dts/exynos" || exit 1
+
+    # Geçici kopyalanan .dtb dosyalarını temizle
+    rm -f "${KERNEL_ROOT}/"*.dtb
+
+    # 5. Son olarak Kernel Image imajını derle
+    echo -e "\n[INFO]: Building Kernel Image...\n"
     make "${BUILD_OPTIONS[@]}" Image || exit 1
-    
-   # make dtbs -j$(nproc)
-    # Copy the built kernel to the build directory
-#    cp "${KERNEL_ROOT}/out/arch/arm64/boot/Image" "${KERNEL_ROOT}/build"
 
     echo -e "\n[INFO]: BUILD FINISHED..!"
 }
+
+# Derlemeyi başlat
 build_kernel
+
+# AK3 klasörünü oluştur ve dosyaları taşı
 mkdir -p AK3
-mv out//arch/arm64/boot/Image AK3/
+mv "${KERNEL_ROOT}/out/arch/arm64/boot/Image" AK3/
+mv "${KERNEL_ROOT}/out/arch/arm64/boot/dtb.img" AK3/
 
 ls -l AK3
