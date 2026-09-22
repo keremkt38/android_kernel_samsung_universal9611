@@ -11,6 +11,7 @@
 
 extern int exynos_cpu_pm_enter(int cpu, int index);
 extern void exynos_cpu_pm_exit(int cpu, int cancel);
+extern void exynos_cpu_pm_clear_state(int cpu);
 
 enum {
 	POWERMODE_TYPE_CLUSTER = 0,

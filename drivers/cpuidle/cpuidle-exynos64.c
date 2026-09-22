@@ -56,8 +56,17 @@ static void post_idle(unsigned int cpu, int index, int fail)
 {
 	cpuidle_profile_cpu_idle_exit(cpu, index, fail);
 
-	if (!index)
+	/*
+	 * Always refresh this cpu's cpupm bookkeeping on idle exit, even
+	 * for plain WFI (index 0). Otherwise a cpu that only ever does
+	 * WFI after having previously entered a deeper idle state keeps
+	 * reporting itself as POWERDOWN to other cpus' cluster power-down
+	 * checks indefinitely - see exynos_cpu_pm_clear_state().
+	 */
+	if (!index) {
+		exynos_cpu_pm_clear_state(cpu);
 		return;
+	}
 
 	exynos_cpu_pm_exit(cpu, fail);
 	cpu_pm_exit();
