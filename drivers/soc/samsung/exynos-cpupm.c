@@ -698,6 +698,39 @@ int exynos_cpu_pm_enter(int cpu, int index)
 	return index;
 }
 
+/*
+ * exynos_cpu_pm_clear_state - mark a cpu as RUN without touching any
+ * cluster/system power_mode bookkeeping.
+ *
+ * exynos_cpu_pm_enter()/exynos_cpu_pm_exit() are only invoked by the
+ * cpuidle driver for idle states deeper than plain WFI (index > 0).
+ * For plain WFI (index 0) the per-cpu "state" field is therefore never
+ * refreshed. If this cpu previously entered a deeper idle state at
+ * least once, its cpupm state is left stuck at CPUPM_STATE_POWERDOWN
+ * indefinitely once it settles into repeated shallow WFI idling.
+ *
+ * Other cpus decide whether it is safe to power down the shared
+ * cluster purely by looking at that stale state (see cpus_busy()), so
+ * a cpu doing nothing but WFI can be silently included in a cluster
+ * power-down decision even though WFI never prepared it (or its
+ * cluster) for having power/clock removed. That can strand it in WFI
+ * with no way to receive a wakeup interrupt, which eventually trips
+ * the hardlockup detector.
+ *
+ * Call this on every idle exit, including index 0, so a cpu that is
+ * merely doing WFI is never mistaken for one that is safely
+ * power-gated.
+ */
+void exynos_cpu_pm_clear_state(int cpu)
+{
+	struct exynos_cpupm *pm;
+
+	spin_lock(&cpupm_lock);
+	pm = &per_cpu(cpupm, cpu);
+	set_state_run(pm);
+	spin_unlock(&cpupm_lock);
+}
+
 void exynos_cpu_pm_exit(int cpu, int cancel)
 {
 	struct exynos_cpupm *pm;
