@@ -292,6 +292,10 @@ int s2mu106_i2c_write_byte(struct i2c_client *client, u8 command, u8 value)
 	ret_w = s2mu106_write_reg(client, command, value);
 	while (ret_w < 0) {
 		pr_info("failed to write reg(0x%x) retry(%d)\n", command, retry);
+		if (retry > 10) {
+			pr_err("%s  retry failed!!\n", __func__);
+			break;
+		}
 		ret_r = s2mu106_read_reg(client, command, &written);
 		if (ret_r < 0)
 			pr_err("%s reg(0x%x)\n", __func__, command);
