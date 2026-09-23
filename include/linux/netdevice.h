@@ -26,6 +26,7 @@
 #define _LINUX_NETDEVICE_H
 
 #include <linux/timer.h>
+#include <linux/skbuff.h>
 #include <linux/bug.h>
 #include <linux/delay.h>
 #include <linux/atomic.h>
@@ -72,6 +73,11 @@ struct udp_tunnel_nic_info;
 struct udp_tunnel_nic;
 struct bpf_prog;
 struct xdp_buff;
+
+struct sk_buff;
+
+/* Forward declaration to resolve circular dependency with skbuff.h */
+extern int netif_receive_skb(struct sk_buff *skb);
 
 void netdev_set_default_ethtool_ops(struct net_device *dev,
 				    const struct ethtool_ops *ops);
@@ -142,6 +148,16 @@ static inline bool dev_xmit_complete(int rc)
  *	used.
  */
 
+static inline void netif_receive_skb_list(struct list_head *head)
+{
+	struct sk_buff *skb, *next;
+
+	list_for_each_entry_safe(skb, next, head, list) {
+		skb_list_del_init(skb);
+		netif_receive_skb(skb);
+	}
+}
+
 #if defined(CONFIG_HYPERV_NET)
 # define LL_MAX_HEADER 128
 #elif defined(CONFIG_WLAN) || IS_ENABLED(CONFIG_AX25)
@@ -201,7 +217,6 @@ struct net_device_stats {
 
 
 #include <linux/cache.h>
-#include <linux/skbuff.h>
 
 #ifdef CONFIG_RPS
 #include <linux/static_key.h>

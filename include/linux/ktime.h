@@ -27,6 +27,10 @@
 /* Nanosecond scalar representation for kernel time values */
 typedef s64	ktime_t;
 
+struct timespec64;
+extern void ktime_get_coarse_ts64(struct timespec64 *ts);
+extern ktime_t ktime_get_coarse(void);
+
 /**
  * ktime_set - Set a ktime_t variable from a seconds/nanoseconds value
  * @secs:	seconds to set
@@ -95,6 +99,7 @@ static inline ktime_t timeval_to_ktime(struct timeval tv)
 
 /* Convert ktime_t to nanoseconds - NOP in the scalar storage format: */
 #define ktime_to_ns(kt)			(kt)
+#include <linux/timekeeping.h>
 
 /**
  * ktime_compare - Compares two ktime_t variables for less, greater or equal
@@ -268,6 +273,13 @@ static inline ktime_t ms_to_ktime(u64 ms)
 {
 	return ms * NSEC_PER_MSEC;
 }
+
+#ifndef ktime_get_coarse_ns
+static inline u64 ktime_get_coarse_ns(void)
+{
+	return ktime_to_ns(ktime_get_coarse());
+}
+#endif
 
 # include <linux/timekeeping.h>
 # include <linux/timekeeping32.h>

@@ -5,6 +5,7 @@
  */
 
 #include <linux/pid.h>
+#include <linux/pid_namespace.h>
 #include <linux/sched.h>
 #include <linux/rculist.h>
 #include <linux/list.h>

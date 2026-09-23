@@ -490,6 +490,9 @@ int hrtimers_prepare_cpu(unsigned int cpu);
 int hrtimers_dead_cpu(unsigned int cpu);
 void save_pcpu_tick(int cpu);
 void restore_pcpu_tick(int cpu);
+#ifndef HRTIMER_MODE_REL_SOFT
+#define HRTIMER_MODE_REL_SOFT HRTIMER_MODE_REL
+#endif
 #else
 #define hrtimers_dead_cpu	NULL
 #endif

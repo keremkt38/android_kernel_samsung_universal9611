@@ -3459,6 +3459,12 @@ static inline int memcpy_from_msg(void *data, struct msghdr *msg, int len)
 	return copy_from_iter_full(data, len, &msg->msg_iter) ? 0 : -EFAULT;
 }
 
+static inline bool skb_gso_validate_network_len(const struct sk_buff *skb,
+												unsigned int mtu)
+{
+	return skb_gso_validate_mac_len(skb, mtu + skb_network_offset(skb));
+}
+
 static inline int memcpy_to_msg(struct msghdr *msg, void *data, int len)
 {
 	return copy_to_iter(data, len, &msg->msg_iter) == len ? 0 : -EFAULT;
@@ -4372,6 +4378,15 @@ static inline void skb_set_redirected(struct sk_buff *skb, bool from_ingress)
 static inline void skb_reset_redirect(struct sk_buff *skb)
 {
 	skb->redirected = 0;
+}
+
+static inline bool skb_is_tc_redirected(const struct sk_buff *skb)
+{
+	#ifdef CONFIG_NET_CLS_ACT
+	return skb->tc_redirected;
+	#else
+	return false;
+	#endif
 }
 
 #endif	/* __KERNEL__ */

@@ -952,4 +952,8 @@ asmlinkage long sys_pidfd_send_signal(int pidfd, int sig,
 				       siginfo_t __user *info,
 				       unsigned int flags);
 
+static inline long ksys_close(unsigned int fd)
+{
+	return sys_close(fd);
+}
 #endif

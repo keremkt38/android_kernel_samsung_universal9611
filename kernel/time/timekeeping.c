@@ -831,6 +831,12 @@ ktime_t ktime_get_coarse_with_offset(enum tk_offsets offs)
 }
 EXPORT_SYMBOL_GPL(ktime_get_coarse_with_offset);
 
+ktime_t ktime_get_coarse(void)
+{
+	return ktime_get_coarse_with_offset(TK_OFFS_MAX);
+}
+EXPORT_SYMBOL_GPL(ktime_get_coarse);
+
 /**
  * ktime_mono_to_any() - convert mononotic time to any other time
  * @tmono:	time to convert.

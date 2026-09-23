@@ -3,6 +3,7 @@
 #define _LINUX_TIMEKEEPING_H
 
 #include <linux/errno.h>
+#include <linux/ktime.h>
 
 /* Included from linux/ktime.h */
 
@@ -51,6 +52,7 @@ enum tk_offsets {
 };
 
 extern ktime_t ktime_get(void);
+extern ktime_t ktime_get_coarse(void);
 extern ktime_t ktime_get_with_offset(enum tk_offsets offs);
 extern ktime_t ktime_get_coarse_with_offset(enum tk_offsets offs);
 extern ktime_t ktime_mono_to_any(ktime_t tmono, enum tk_offsets offs);
