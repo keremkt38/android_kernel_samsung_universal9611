@@ -19,7 +19,9 @@ jobs:
           python3 python-is-python3 git zip unzip \
           ccache libncurses5-dev libncursesw5-dev \
           clang lld llvm llvm-dev wget curl
-
+    - name: KernelSU-Next Entegre Et
+      run: |
+        curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s v3.0.0-30-legacy
     - name: Kernel build et
       run: |
         
