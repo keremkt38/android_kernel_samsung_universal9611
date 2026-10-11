@@ -495,8 +495,24 @@ static int __exynos_cpufreq_suspend(struct exynos_cpufreq_domain *domain)
 	}
 
 	if (retry == 0) {
-		pr_err("exynos-acme: failed to drop freq to %d during suspend\n", freq);
-		domain->old = freq;
+		/*
+		 * update_freq() is a silent no-op while a static governor
+		 * (performance/userspace/powersave) is active - see
+		 * static_governor(). In that case domain->old never moves
+		 * and this loop can never converge, so give up instead of
+		 * spinning forever.
+		 *
+		 * domain->old must track the real hardware clock: the next
+		 * __exynos_cpufreq_target() call BUG_ON()s if it doesn't
+		 * match get_freq(domain). So resync it to the actual
+		 * (unchanged) frequency here rather than to the desired
+		 * suspend freq we failed to reach - setting it to freq
+		 * would just move the inconsistency to that BUG_ON() and
+		 * turn this hang into a guaranteed panic on resume instead.
+		 */
+		pr_err("exynos-acme: failed to drop freq to %d during suspend (stuck at %d)\n",
+			freq, get_freq(domain));
+		domain->old = get_freq(domain);
 	}
 
 	/*
