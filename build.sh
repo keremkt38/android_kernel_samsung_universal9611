@@ -43,12 +43,13 @@ if [ ! -f ".requirements" ]; then
 fi
 mkdir -p "${KERNEL_ROOT}/out" "${KERNEL_ROOT}/build" "${HOME}/toolchains"
 
-# init neutron-clang
-if [ ! -d "${HOME}/toolchains/neutron-clang" ]; then
-    echo -e "\n[INFO] Cloning Neutron-Clang Toolchain\n"
-    mkdir -p "${HOME}/toolchains/neutron-clang" && cd "${HOME}/toolchains/neutron-clang"
-    curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman" && chmod +x antman
-    bash antman -S && bash antman --patch=glibc
+# init weebx-clang
+if [ ! -d "${HOME}/toolchains/weebx-clang" ]; then
+    echo -e "\n[INFO] Downloading WeebX-Clang Toolchain\n"
+    mkdir -p "${HOME}/toolchains/weebx-clang" && cd "${HOME}/toolchains/weebx-clang"
+    wget "$(curl -s https://raw.githubusercontent.com/XSans0/WeebX-Clang/main/main/link.txt)" -O "weebx-clang.tar.gz" || exit 1
+    tar -xf "weebx-clang.tar.gz" -C "${HOME}/toolchains/weebx-clang"
+    rm -f "weebx-clang.tar.gz"
     cd "${KERNEL_ROOT}"
 fi
 
@@ -62,13 +63,13 @@ if [ ! -d "${HOME}/toolchains/gcc" ]; then
 fi
 
 # Export toolchain paths
-export PATH="${HOME}/toolchains/neutron-clang/bin:${PATH}"
-export NEUTRON_PATH="${HOME}/toolchains/neutron-clang/bin"
-export LD_LIBRARY_PATH="${HOME}/toolchains/neutron-clang/lib:${LD_LIBRARY_PATH}"
+export PATH="${HOME}/toolchains/weebx-clang/bin:${PATH}"
+export WEEBX_PATH="${HOME}/toolchains/weebx-clang/bin"
+export LD_LIBRARY_PATH="${HOME}/toolchains/weebx-clang/lib:${LD_LIBRARY_PATH}"
 
 # Set cross-compile environment variables
 export BUILD_CROSS_COMPILE="${HOME}/toolchains/gcc/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-"
-export BUILD_CC="${HOME}/toolchains/neutron-clang/bin/clang"
+export BUILD_CC="${HOME}/toolchains/weebx-clang/bin/clang"
 
 # Build options for the kernel
 export BUILD_OPTIONS=(
@@ -81,15 +82,15 @@ export BUILD_OPTIONS=(
     CLANG_TRIPLE=aarch64-linux-gnu-
     LLVM=1
     LLVM_IAS=1
-    AR="${NEUTRON_PATH}/llvm-ar"
-    NM="${NEUTRON_PATH}/llvm-nm"
-    LD="${NEUTRON_PATH}/ld.lld"
-    STRIP="${NEUTRON_PATH}/llvm-strip"
-    OBJCOPY="${NEUTRON_PATH}/llvm-objcopy"
-    OBJDUMP="${NEUTRON_PATH}/llvm-objdump"
-    READELF="${NEUTRON_PATH}/llvm-readelf"
-    HOSTCC="${NEUTRON_PATH}/clang"
-    HOSTCXX="${NEUTRON_PATH}/clang++"
+    AR="${WEEBX_PATH}/llvm-ar"
+    NM="${WEEBX_PATH}/llvm-nm"
+    LD="${WEEBX_PATH}/ld.lld"
+    STRIP="${WEEBX_PATH}/llvm-strip"
+    OBJCOPY="${WEEBX_PATH}/llvm-objcopy"
+    OBJDUMP="${WEEBX_PATH}/llvm-objdump"
+    READELF="${WEEBX_PATH}/llvm-readelf"
+    HOSTCC="${WEEBX_PATH}/clang"
+    HOSTCXX="${WEEBX_PATH}/clang++"
 )
 
 build_kernel(){
