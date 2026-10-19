@@ -43,6 +43,7 @@
 #include <linux/sched/task.h>
 #include <linux/idr.h>
 #include <linux/err.h>
+#include <linux/file.h>
 
 #define pid_hashfn(nr, ns)	\
 	hash_long((unsigned long)nr + (unsigned long)ns, pidhash_shift)
@@ -548,6 +549,28 @@ void __init pid_idr_init(void)
 
 struct pid *pidfd_get_pid(int fd, unsigned int *flags)
 {
-	return ERR_PTR(-EOPNOTSUPP);
+	struct fd f = fdget(fd);
+	struct pid *pid;
+
+	if (!f.file)
+		return ERR_PTR(-EBADF);
+
+	if (f.file->f_op != &pidfd_fops) {
+		fdput(f);
+		return ERR_PTR(-EBADF);
+	}
+
+	/* The pid is stored directly in the pidfd file's private_data. */
+	pid = f.file->private_data;
+	if (pid) {
+		get_pid(pid);
+		if (flags)
+			*flags = f.file->f_flags;
+	} else {
+		pid = ERR_PTR(-EINVAL);
+	}
+
+	fdput(f);
+	return pid;
 }
 EXPORT_SYMBOL_GPL(pidfd_get_pid);
