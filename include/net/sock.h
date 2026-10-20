@@ -152,6 +152,11 @@ typedef __u64 __bitwise __addrpair;
  *	This is the minimal network layer representation of sockets, the header
  *	for struct sock and struct inet_timewait_sock.
  */
+/* Real implementation lives in net/core/sock_diag.c; declared here too
+ * so callers that only pull in sock.h (not sock_diag.h) can use it.
+ */
+u64 sock_gen_cookie(struct sock *sk);
+
 struct sock_common {
 	/* skc_daddr and skc_rcv_saddr must be grouped on a 8 bytes aligned
 	 * address on 64bit arches : cf INET_MATCH()

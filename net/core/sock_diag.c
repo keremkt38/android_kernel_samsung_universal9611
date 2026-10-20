@@ -32,6 +32,19 @@ u64 __sock_gen_cookie(struct sock *sk)
 		atomic64_cmpxchg(&sk->sk_cookie, 0, res);
 	}
 }
+EXPORT_SYMBOL_GPL(__sock_gen_cookie);
+
+u64 sock_gen_cookie(struct sock *sk)
+{
+	u64 cookie;
+
+	preempt_disable();
+	cookie = __sock_gen_cookie(sk);
+	preempt_enable();
+
+	return cookie;
+}
+EXPORT_SYMBOL_GPL(sock_gen_cookie);
 
 int sock_diag_check_cookie(struct sock *sk, const __u32 *cookie)
 {
