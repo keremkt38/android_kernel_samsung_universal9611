@@ -21,7 +21,7 @@ jobs:
           clang lld llvm llvm-dev wget curl
     - name: KernelSU-Next Entegre Et
       run: |
-        curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s v3.0.0-30-legacy
+        curl -LSs "https://raw.githubusercontent.com/keremkt38/KernelSU/fork/kernel/setup.sh" | 
     - name: Kernel build et
       run: |
         
