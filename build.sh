@@ -95,7 +95,7 @@ export BUILD_OPTIONS=(
 
 build_kernel(){
     # 1. Defconfig uygula
-    make "${BUILD_OPTIONS[@]}" exynos9611-m30s_defconfig || exit 1
+    make "${BUILD_OPTIONS[@]}" exynos9610-a50_defconfig || exit 1
 
     # 2. Önce Device Tree Blob'ları (DTB) derle
     echo -e "\n[INFO]: Building Device Tree Blobs (dtbs)...\n"

@@ -32,7 +32,7 @@ jobs:
       run: |
         git clone https://github.com/keremkt38/AnyKernel3.git
         
-        OUT_NAME="Argaeus_m30s_${{ github.run_number }}"
+        OUT_NAME="Argaeus_a50_${{ github.run_number }}"
 
         # Kernel image kopyala
         cp AK3/Image AnyKernel3/
@@ -45,7 +45,7 @@ jobs:
 
     - name: Telegram'a gönder
       run: |
-        FILE="AnyKernel3/Argaeus_m30s_${{ github.run_number }}.zip"
+        FILE="AnyKernel3/Argaeus_a50_${{ github.run_number }}.zip"
 
         curl -F document=@"$FILE" \
              -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
