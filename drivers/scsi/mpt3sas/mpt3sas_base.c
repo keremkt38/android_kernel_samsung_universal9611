@@ -1389,6 +1389,22 @@ _base_build_zero_len_sge_ieee(struct MPT3SAS_ADAPTER *ioc, void *paddr)
 	_base_add_sg_single_ieee(paddr, sgl_flags, 0, 0, -1);
 }
 
+static inline int _base_scsi_dma_map(struct scsi_cmnd *cmd)
+{
+	/*
+	 * Some firmware versions byte-swap the REPORT ZONES command reply from
+	 * ATA-ZAC devices by directly accessing in the host buffer. This does
+	 * not respect the default command DMA direction and causes IOMMU page
+	 * faults on some architectures with an IOMMU enforcing write mappings
+	 * (e.g. AMD hosts). Avoid such issue by making the report zones buffer
+	 * mapping bi-directional.
+	 */
+	if (cmd->cmnd[0] == ZBC_IN && cmd->cmnd[1] == ZI_REPORT_ZONES)
+		cmd->sc_data_direction = DMA_BIDIRECTIONAL;
+
+	return scsi_dma_map(cmd);
+}
+
 /**
  * _base_build_sg_scmd - main sg creation routine
  * @ioc: per adapter object
@@ -1433,7 +1449,7 @@ _base_build_sg_scmd(struct MPT3SAS_ADAPTER *ioc,
 	sgl_flags = sgl_flags << MPI2_SGE_FLAGS_SHIFT;
 
 	sg_scmd = scsi_sglist(scmd);
-	sges_left = scsi_dma_map(scmd);
+	sges_left = _base_scsi_dma_map(scmd);
 	if (sges_left < 0) {
 		sdev_printk(KERN_ERR, scmd->device,
 		 "pci_map_sg failed: request for %d bytes!\n",
@@ -1572,7 +1588,7 @@ _base_build_sg_scmd_ieee(struct MPT3SAS_ADAPTER *ioc,
 	    MPI2_IEEE_SGE_FLAGS_SYSTEM_ADDR;
 
 	sg_scmd = scsi_sglist(scmd);
-	sges_left = scsi_dma_map(scmd);
+	sges_left = _base_scsi_dma_map(scmd);
 	if (sges_left < 0) {
 		sdev_printk(KERN_ERR, scmd->device,
 			"pci_map_sg failed: request for %d bytes!\n",
@@ -1724,9 +1740,11 @@ _base_config_dma_addressing(struct MPT3SAS_ADAPTER *ioc, struct pci_dev *pdev)
 {
 	struct sysinfo s;
 	u64 consistent_dma_mask;
+	/* Set 63 bit DMA mask for all SAS3 and SAS35 controllers */
+	int dma_mask = (ioc->hba_mpi_version_belonged > MPI2_VERSION) ? 63 : 64;
 
 	if (ioc->dma_mask)
-		consistent_dma_mask = DMA_BIT_MASK(64);
+		consistent_dma_mask = DMA_BIT_MASK(dma_mask);
 	else
 		consistent_dma_mask = DMA_BIT_MASK(32);
 
@@ -1734,11 +1752,11 @@ _base_config_dma_addressing(struct MPT3SAS_ADAPTER *ioc, struct pci_dev *pdev)
 		const uint64_t required_mask =
 		    dma_get_required_mask(&pdev->dev);
 		if ((required_mask > DMA_BIT_MASK(32)) &&
-		    !pci_set_dma_mask(pdev, DMA_BIT_MASK(64)) &&
+		    !pci_set_dma_mask(pdev, DMA_BIT_MASK(dma_mask)) &&
 		    !pci_set_consistent_dma_mask(pdev, consistent_dma_mask)) {
 			ioc->base_add_sg_single = &_base_add_sg_single_64;
 			ioc->sge_size = sizeof(Mpi2SGESimple64_t);
-			ioc->dma_mask = 64;
+			ioc->dma_mask = dma_mask;
 			goto out;
 		}
 	}
@@ -1764,7 +1782,7 @@ static int
 _base_change_consistent_dma_mask(struct MPT3SAS_ADAPTER *ioc,
 				      struct pci_dev *pdev)
 {
-	if (pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64))) {
+	if (pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(ioc->dma_mask))) {
 		if (pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32)))
 			return -ENODEV;
 	}
@@ -3138,7 +3156,7 @@ _base_static_config_pages(struct MPT3SAS_ADAPTER *ioc)
 	 * flag unset in NVDATA.
 	 */
 	mpt3sas_config_get_manufacturing_pg11(ioc, &mpi_reply, &ioc->manu_pg11);
-	if (ioc->manu_pg11.EEDPTagMode == 0) {
+	if (!ioc->is_gen35_ioc && ioc->manu_pg11.EEDPTagMode == 0) {
 		pr_err("%s: overriding NVDATA EEDPTagMode setting\n",
 		    ioc->name);
 		ioc->manu_pg11.EEDPTagMode &= ~0x3;
@@ -3261,7 +3279,9 @@ _base_release_memory_pools(struct MPT3SAS_ADAPTER *ioc)
 		ioc->scsi_lookup = NULL;
 	}
 	kfree(ioc->hpr_lookup);
+	ioc->hpr_lookup = NULL;
 	kfree(ioc->internal_lookup);
+	ioc->internal_lookup = NULL;
 	if (ioc->chain_lookup) {
 		for (i = 0; i < ioc->chain_depth; i++) {
 			if (ioc->chain_lookup[i].chain_buffer)
@@ -3477,7 +3497,7 @@ _base_allocate_memory_pools(struct MPT3SAS_ADAPTER *ioc)
 		total_sz += sz;
 	} while (ioc->rdpq_array_enable && (++i < ioc->reply_queue_count));
 
-	if (ioc->dma_mask == 64) {
+	if (ioc->dma_mask > 32) {
 		if (_base_change_consistent_dma_mask(ioc, ioc->pdev) != 0) {
 			pr_warn(MPT3SAS_FMT
 			    "no suitable consistent DMA mask for %s\n",
@@ -4388,7 +4408,9 @@ _base_wait_for_iocstate(struct MPT3SAS_ADAPTER *ioc, int timeout)
 		return -EFAULT;
 	}
 
- issue_diag_reset:
+	return 0;
+
+issue_diag_reset:
 	rc = _base_diag_reset(ioc);
 	return rc;
 }
@@ -4571,7 +4593,7 @@ _base_send_ioc_init(struct MPT3SAS_ADAPTER *ioc)
 
 	r = _base_handshake_req_reply_wait(ioc,
 	    sizeof(Mpi2IOCInitRequest_t), (u32 *)&mpi_request,
-	    sizeof(Mpi2IOCInitReply_t), (u16 *)&mpi_reply, 10);
+	    sizeof(Mpi2IOCInitReply_t), (u16 *)&mpi_reply, 30);
 
 	if (r != 0) {
 		pr_err(MPT3SAS_FMT "%s: handshake failed (r=%d)\n",
@@ -5432,6 +5454,12 @@ mpt3sas_base_attach(struct MPT3SAS_ADAPTER *ioc)
 	ioc->pd_handles_sz = (ioc->facts.MaxDevHandle / 8);
 	if (ioc->facts.MaxDevHandle % 8)
 		ioc->pd_handles_sz++;
+	/*
+	 * pd_handles_sz should have, at least, the minimal room for
+	 * set_bit()/test_bit(), otherwise out-of-memory touch may occur.
+	 */
+	ioc->pd_handles_sz = ALIGN(ioc->pd_handles_sz, sizeof(unsigned long));
+
 	ioc->pd_handles = kzalloc(ioc->pd_handles_sz,
 	    GFP_KERNEL);
 	if (!ioc->pd_handles) {
@@ -5449,16 +5477,27 @@ mpt3sas_base_attach(struct MPT3SAS_ADAPTER *ioc)
 	ioc->pend_os_device_add_sz = (ioc->facts.MaxDevHandle / 8);
 	if (ioc->facts.MaxDevHandle % 8)
 		ioc->pend_os_device_add_sz++;
+
+	/*
+	 * pend_os_device_add_sz should have, at least, the minimal room for
+	 * set_bit()/test_bit(), otherwise out-of-memory may occur.
+	 */
+	ioc->pend_os_device_add_sz = ALIGN(ioc->pend_os_device_add_sz,
+					   sizeof(unsigned long));
 	ioc->pend_os_device_add = kzalloc(ioc->pend_os_device_add_sz,
 	    GFP_KERNEL);
-	if (!ioc->pend_os_device_add)
+	if (!ioc->pend_os_device_add) {
+		r = -ENOMEM;
 		goto out_free_resources;
+	}
 
 	ioc->device_remove_in_progress_sz = ioc->pend_os_device_add_sz;
 	ioc->device_remove_in_progress =
 		kzalloc(ioc->device_remove_in_progress_sz, GFP_KERNEL);
-	if (!ioc->device_remove_in_progress)
+	if (!ioc->device_remove_in_progress) {
+		r = -ENOMEM;
 		goto out_free_resources;
+	}
 
 	ioc->fwfault_debug = mpt3sas_fwfault_debug;
 
@@ -5526,6 +5565,13 @@ mpt3sas_base_attach(struct MPT3SAS_ADAPTER *ioc)
 	r = _base_make_ioc_operational(ioc);
 	if (r)
 		goto out_free_resources;
+
+	/*
+	 * Copy current copy of IOCFacts in prev_fw_facts
+	 * and it will be used during online firmware upgrade.
+	 */
+	memcpy(&ioc->prev_fw_facts, &ioc->facts,
+	    sizeof(struct mpt3sas_facts));
 
 	ioc->non_operational_loop = 0;
 	ioc->got_task_abort_from_ioctl = 0;
@@ -5696,6 +5742,91 @@ mpt3sas_wait_for_commands_to_complete(struct MPT3SAS_ADAPTER *ioc)
 }
 
 /**
+ * _base_check_ioc_facts_changes - Look for increase/decrease of IOCFacts
+ *     attributes during online firmware upgrade and update the corresponding
+ *     IOC variables accordingly.
+ *
+ * @ioc: Pointer to MPT_ADAPTER structure
+ */
+static int
+_base_check_ioc_facts_changes(struct MPT3SAS_ADAPTER *ioc)
+{
+	u16 pd_handles_sz;
+	void *pd_handles = NULL, *blocking_handles = NULL;
+	void *pend_os_device_add = NULL, *device_remove_in_progress = NULL;
+	struct mpt3sas_facts *old_facts = &ioc->prev_fw_facts;
+
+	if (ioc->facts.MaxDevHandle > old_facts->MaxDevHandle) {
+		pd_handles_sz = (ioc->facts.MaxDevHandle / 8);
+		if (ioc->facts.MaxDevHandle % 8)
+			pd_handles_sz++;
+
+		/*
+		 * pd_handles should have, at least, the minimal room for
+		 * set_bit()/test_bit(), otherwise out-of-memory touch may
+		 * occur.
+		 */
+		pd_handles_sz = ALIGN(pd_handles_sz, sizeof(unsigned long));
+		pd_handles = krealloc(ioc->pd_handles, pd_handles_sz,
+		    GFP_KERNEL);
+		if (!pd_handles) {
+			ioc_info(ioc,
+			    "Unable to allocate the memory for pd_handles of sz: %d\n",
+			    pd_handles_sz);
+			return -ENOMEM;
+		}
+		memset(pd_handles + ioc->pd_handles_sz, 0,
+		    (pd_handles_sz - ioc->pd_handles_sz));
+		ioc->pd_handles = pd_handles;
+
+		blocking_handles = krealloc(ioc->blocking_handles,
+		    pd_handles_sz, GFP_KERNEL);
+		if (!blocking_handles) {
+			ioc_info(ioc,
+			    "Unable to allocate the memory for "
+			    "blocking_handles of sz: %d\n",
+			    pd_handles_sz);
+			return -ENOMEM;
+		}
+		memset(blocking_handles + ioc->pd_handles_sz, 0,
+		    (pd_handles_sz - ioc->pd_handles_sz));
+		ioc->blocking_handles = blocking_handles;
+		ioc->pd_handles_sz = pd_handles_sz;
+
+		pend_os_device_add = krealloc(ioc->pend_os_device_add,
+		    pd_handles_sz, GFP_KERNEL);
+		if (!pend_os_device_add) {
+			ioc_info(ioc,
+			    "Unable to allocate the memory for pend_os_device_add of sz: %d\n",
+			    pd_handles_sz);
+			return -ENOMEM;
+		}
+		memset(pend_os_device_add + ioc->pend_os_device_add_sz, 0,
+		    (pd_handles_sz - ioc->pend_os_device_add_sz));
+		ioc->pend_os_device_add = pend_os_device_add;
+		ioc->pend_os_device_add_sz = pd_handles_sz;
+
+		device_remove_in_progress = krealloc(
+		    ioc->device_remove_in_progress, pd_handles_sz, GFP_KERNEL);
+		if (!device_remove_in_progress) {
+			ioc_info(ioc,
+			    "Unable to allocate the memory for "
+			    "device_remove_in_progress of sz: %d\n "
+			    , pd_handles_sz);
+			return -ENOMEM;
+		}
+		memset(device_remove_in_progress +
+		    ioc->device_remove_in_progress_sz, 0,
+		    (pd_handles_sz - ioc->device_remove_in_progress_sz));
+		ioc->device_remove_in_progress = device_remove_in_progress;
+		ioc->device_remove_in_progress_sz = pd_handles_sz;
+	}
+
+	memcpy(&ioc->prev_fw_facts, &ioc->facts, sizeof(struct mpt3sas_facts));
+	return 0;
+}
+
+/**
  * mpt3sas_base_hard_reset_handler - reset controller
  * @ioc: Pointer to MPT_ADAPTER structure
  * @type: FORCE_BIG_HAMMER or SOFT_RESET
@@ -5767,6 +5898,13 @@ mpt3sas_base_hard_reset_handler(struct MPT3SAS_ADAPTER *ioc,
 	if (r)
 		goto out;
 
+	r = _base_check_ioc_facts_changes(ioc);
+	if (r) {
+		ioc_info(ioc,
+		    "Some of the parameters got changed in this new firmware"
+		    " image and it requires system reboot\n");
+		goto out;
+	}
 	if (ioc->rdpq_array_enable && !ioc->rdpq_array_capable)
 		panic("%s: Issue occurred with flashing controller firmware."
 		      "Please reboot the system and ensure that the correct"
