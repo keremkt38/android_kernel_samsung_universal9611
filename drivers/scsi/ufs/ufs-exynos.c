@@ -19,6 +19,7 @@
 #include "mphy.h"
 #include "ufshcd-pltfrm.h"
 #include "ufs-exynos.h"
+#include "ufs-exynos-fmp.h"
 #include <soc/samsung/exynos-fsys0-tcxo.h>
 #include <soc/samsung/exynos-cpupm.h>
 #include <linux/mfd/syscon.h>
@@ -156,6 +157,7 @@ static inline int ufs_pre_gear_change(struct exynos_ufs *ufs,
 	int ret = 0;
 
 	p->pmd = pmd;
+
 	if ((ret = ufs_cal_pre_pmc(p)) != UFS_CAL_NO_ERROR) {
 		dev_err(ufs->dev, "ufs_pre_gear_change = %d!!!\n", ret);
 		return -EPERM;
@@ -400,6 +402,7 @@ static void exynos_ufs_init_pmc_req(struct ufs_hba *hba,
 	/* update lane variable after link */
 	ufs->num_rx_lanes = pwr_max->lane_rx;
 	ufs->num_tx_lanes = pwr_max->lane_tx;
+	
 
 	p->connected_rx_lane = pwr_max->lane_rx;
 	p->connected_tx_lane = pwr_max->lane_tx;
@@ -574,8 +577,7 @@ static void exynos_ufs_set_features(struct ufs_hba *hba, u32 hw_rev)
 	hba->quirks = UFSHCD_QUIRK_PRDT_BYTE_GRAN |
 			UFSHCI_QUIRK_SKIP_INTR_AGGR |
 			UFSHCD_QUIRK_UNRESET_INTR_AGGR |
-			UFSHCD_QUIRK_BROKEN_REQ_LIST_CLR |
-			UFSHCD_QUIRK_BROKEN_CRYPTO;
+			UFSHCD_QUIRK_BROKEN_REQ_LIST_CLR;
 
 	/* quirks of exynos-specific driver */
 }
@@ -625,7 +627,9 @@ static int exynos_ufs_init(struct ufs_hba *hba)
 	else
 		ufs->smu = id;
 
-	exynos_ufs_fmp_config(hba, 1);
+	/* FMPSECURITY & SMU */
+	exynos_ufs_fmp_sec_cfg(ufs);
+	exynos_ufs_smu_init(ufs);
 
 	/* Enable log */
 	ret =  exynos_ufs_init_dbg(hba);
@@ -1022,7 +1026,9 @@ static int __exynos_ufs_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 		clk_prepare_enable(ufs->clk_hci);
 	exynos_ufs_ctrl_auto_hci_clk(ufs, false);
 
-	exynos_ufs_fmp_config(hba, 0);
+	/* FMPSECURITY & SMU resume */
+	exynos_ufs_fmp_sec_cfg(ufs);
+	exynos_ufs_smu_resume(ufs);
 
 	/* secure log */
 #ifdef CONFIG_EXYNOS_SMC_LOGGING
@@ -1051,6 +1057,27 @@ static u8 exynos_ufs_get_unipro_direct(struct ufs_hba *hba, u32 num)
 	return unipro_readl(ufs, offset[num]);
 }
 
+static int exynos_ufs_crypto_engine_cfg(struct ufs_hba *hba,
+				struct ufshcd_lrb *lrbp,
+				struct scatterlist *sg, int index,
+				int sector_offset, int page_index)
+{
+	return exynos_ufs_fmp_cfg(hba, lrbp, sg, index, sector_offset, page_index);
+}
+
+static int exynos_ufs_crypto_engine_clear(struct ufs_hba *hba,
+				struct ufshcd_lrb *lrbp)
+{
+	return exynos_ufs_fmp_clear(hba, lrbp);
+}
+
+static int exynos_ufs_access_control_abort(struct ufs_hba *hba)
+{
+	struct exynos_ufs *ufs = to_exynos_ufs(hba);
+
+	return exynos_ufs_smu_abort(ufs);
+}
+
 static struct ufs_hba_variant_ops exynos_ufs_ops = {
 	.init = exynos_ufs_init,
 	.host_reset = exynos_ufs_host_reset,
@@ -1067,6 +1094,9 @@ static struct ufs_hba_variant_ops exynos_ufs_ops = {
 	.suspend = __exynos_ufs_suspend,
 	.resume = __exynos_ufs_resume,
 	.get_unipro_result = exynos_ufs_get_unipro_direct,
+	.crypto_engine_cfg = exynos_ufs_crypto_engine_cfg,
+	.crypto_engine_clear = exynos_ufs_crypto_engine_clear,
+	.access_control_abort = exynos_ufs_access_control_abort,
 };
 
 static int exynos_ufs_populate_dt_phy(struct device *dev, struct exynos_ufs *ufs)
