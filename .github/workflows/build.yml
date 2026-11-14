@@ -2,6 +2,15 @@ name: Kernel Build
 
 on:
   workflow_dispatch:
+    inputs:
+      selinux_mode:
+        description: 'SELinux modu'
+        required: true
+        default: 'enforcing'
+        type: choice
+        options:
+          - enforcing
+          - permissive
 
 jobs:
   build:
@@ -22,6 +31,16 @@ jobs:
     - name: KernelSU-Next Entegre Et
       run: |
         curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s v3.0.0-30-legacy
+    - name: SELinux modunu ayarla
+      env:
+        SELINUX_MODE: ${{ inputs.selinux_mode }}
+      run: |
+        DEFCONFIG=arch/arm64/configs/exynos9611-m30s_defconfig
+        if [ "$SELINUX_MODE" = "permissive" ]; then
+          sed -i 's/^# CONFIG_ALWAYS_PERMIT is not set/CONFIG_ALWAYS_PERMIT=y/' "$DEFCONFIG"
+          grep -q '^CONFIG_ALWAYS_PERMIT=y' "$DEFCONFIG" || echo 'CONFIG_ALWAYS_PERMIT=y' >> "$DEFCONFIG"
+        fi
+        grep -n 'ALWAYS_PERMIT' "$DEFCONFIG"
     - name: Kernel build et
       run: |
         
@@ -32,7 +51,7 @@ jobs:
       run: |
         git clone https://github.com/keremkt38/AnyKernel3.git
         
-        OUT_NAME="EverlineX_m30s_${{ github.run_number }}"
+        OUT_NAME="EverlineX_m30s_${{ github.run_number }}_${{ inputs.selinux_mode }}"
 
         # Kernel image kopyala
         cp AK3/Image AnyKernel3/
@@ -45,7 +64,7 @@ jobs:
 
     - name: Telegram'a gönder
       run: |
-        FILE="AnyKernel3/EverlineX_m30s_${{ github.run_number }}.zip"
+        FILE="AnyKernel3/EverlineX_m30s_${{ github.run_number }}_${{ inputs.selinux_mode }}.zip"
 
         curl -F document=@"$FILE" \
              -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
