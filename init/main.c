@@ -385,6 +385,7 @@ static inline void setup_nr_cpu_ids(void) { }
 static inline void smp_prepare_cpus(unsigned int maxcpus) { }
 #endif
 
+#ifdef CONFIG_ANDROID_SAR_RAMDISK
 static void remove_flag(char *cmd, const char *flag)
 {
 	char *start_addr, *end_addr;
@@ -397,6 +398,7 @@ static void remove_flag(char *cmd, const char *flag)
 			*(start_addr - 1) = '\0';
 	}
 }
+#endif
 
 /*
  * We need to store the untouched command line for future reference.
@@ -406,6 +408,7 @@ static void remove_flag(char *cmd, const char *flag)
  */
 static void __init setup_command_line(char *command_line)
 {
+#ifdef CONFIG_ANDROID_SAR_RAMDISK
 	// magisk removes skip_initramfs from kernel
 	// so skip_initramfs won't be removed from cmdline
 	// and magisk will use SARInit which renders
@@ -414,6 +417,7 @@ static void __init setup_command_line(char *command_line)
 	char skip_initramfs[] = "skip!initramfs";
 	skip_initramfs[4] = '_';
 	remove_flag(command_line, skip_initramfs);
+#endif
 
 	saved_command_line =
 		memblock_virt_alloc(strlen(boot_command_line) + 1, 0);
