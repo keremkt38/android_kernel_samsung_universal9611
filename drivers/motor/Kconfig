@@ -3,7 +3,7 @@
 #
 config ANDROID_TIMED_OUTPUT
 	bool "Timed output class driver"
-	default y
+	default n
 
 config ISA1000
 	tristate "IMAGIS ISA1000"
@@ -16,6 +16,7 @@ config ISA1000
 config SEC_VIB
 	tristate "SEC DC Vibrator"
 	default n
+	select ANDROID_TIMED_OUTPUT
 	help
 		If you say yes here you will get support for the
 		SEC DC Vibrator.
