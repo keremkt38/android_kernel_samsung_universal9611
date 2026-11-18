@@ -5,6 +5,20 @@
 	dtbo-hw_rev = <0x4>;
 	dtbo-hw_rev_end = <0xff>;
 
+	/*
+	 * The Pie bootloader passes neither androidboot.boot_devices nor the
+	 * boot image cmdline. Provide them through the device tree, which
+	 * init and fs_mgr check first.
+	 */
+	fragment@android {
+		target-path = "/firmware/android";
+
+		__overlay__ {
+			boot_devices = "13520000.ufs";
+			super_partition = "system";
+		};
+	};
+
 	fragment@modemif {
 		target-path = [2f 00];
 
