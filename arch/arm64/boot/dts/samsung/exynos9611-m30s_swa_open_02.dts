@@ -19,6 +19,21 @@
 		};
 	};
 
+	/*
+	 * The kernel display driver needs the "system" DMA-BUF heap. Recovery
+	 * may run on a stock or older base dtb without it, so add it here.
+	 */
+	fragment@dmaheap {
+		target-path = "/";
+
+		__overlay__ {
+			system_dma_heap {
+				compatible = "samsung,dma-heap-system";
+				dma-heap,name = "system";
+			};
+		};
+	};
+
 	fragment@modemif {
 		target-path = [2f 00];
 
