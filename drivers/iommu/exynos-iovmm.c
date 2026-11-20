@@ -915,8 +915,6 @@ struct ion_dmabuf_iova_entry {
 	struct list_head list;
 	struct device *dev;
 	struct dma_buf *dmabuf;
-	struct sg_table *sgt;
-	enum dma_data_direction direction;
 	dma_addr_t iova;
 	size_t size;
 	atomic_t refcnt;
@@ -933,13 +931,18 @@ dma_addr_t ion_iovmm_map(struct dma_buf_attachment *attachment,
 	struct exynos_iovmm *vmm;
 	struct ion_dmabuf_iova_entry *entry;
 	dma_addr_t iova;
+	size_t total_size;
 
 	if (!attachment || !attachment->dmabuf || !attachment->dev)
 		return -EINVAL;
 
+	total_size = attachment->dmabuf->size;
+
 	mutex_lock(&ion_dmabuf_iova_lock);
 	list_for_each_entry(entry, &ion_dmabuf_iova_list, list) {
-		if (entry->dev == attachment->dev && entry->dmabuf == attachment->dmabuf) {
+		if (entry->dev == attachment->dev &&
+		    entry->dmabuf == attachment->dmabuf &&
+		    entry->size == total_size) {
 			atomic_inc(&entry->refcnt);
 			iova = entry->iova + offset;
 			mutex_unlock(&ion_dmabuf_iova_lock);
@@ -973,31 +976,35 @@ dma_addr_t ion_iovmm_map(struct dma_buf_attachment *attachment,
 	if (device_get_dma_attr(attachment->dev) == DEV_DMA_COHERENT)
 		prop |= IOMMU_CACHE;
 
-	sgt = dma_buf_map_attachment(attachment, direction);
-	if (IS_ERR_OR_NULL(sgt))
-		return sgt ? PTR_ERR(sgt) : -EINVAL;
+	if (attachment->sgt) {
+		sgt = attachment->sgt;
+	} else {
+		sgt = dma_buf_map_attachment(attachment, direction);
+		if (IS_ERR_OR_NULL(sgt))
+			return sgt ? PTR_ERR(sgt) : -EINVAL;
+	}
 
 	if (vmm) {
-		if (size == 0)
-			size = attachment->dmabuf->size;
-
-		iova = iovmm_map(attachment->dev, sgt->sgl, offset, size, direction, prop);
-		if (IS_ERR_VALUE(iova)) {
+		iova = iovmm_map(attachment->dev, sgt->sgl, 0, total_size,
+				direction, prop);
+		if (!attachment->sgt)
 			dma_buf_unmap_attachment(attachment, sgt, direction);
+		if (IS_ERR_VALUE(iova)) {
 			return iova;
 		}
+		iova += offset;
 	} else {
 		iova = sg_dma_address(sgt->sgl) + offset;
+		if (!attachment->sgt)
+			dma_buf_unmap_attachment(attachment, sgt, direction);
 	}
 
 	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
 	if (entry) {
 		entry->dev = attachment->dev;
 		entry->dmabuf = attachment->dmabuf;
-		entry->sgt = sgt;
-		entry->direction = direction;
 		entry->iova = iova - offset;
-		entry->size = size;
+		entry->size = total_size;
 		atomic_set(&entry->refcnt, 1);
 
 		mutex_lock(&ion_dmabuf_iova_lock);
@@ -1030,16 +1037,12 @@ void ion_iovmm_unmap(struct dma_buf_attachment *attachment, dma_addr_t iova)
 		if (entry->dev == attachment->dev && entry->dmabuf == attachment->dmabuf) {
 			if (atomic_dec_and_test(&entry->refcnt)) {
 				dma_addr_t base_iova = entry->iova;
-				struct sg_table *sgt = entry->sgt;
-				enum dma_data_direction dir = entry->direction;
 
 				list_del(&entry->list);
 				kfree(entry);
 				mutex_unlock(&ion_dmabuf_iova_lock);
 				if (exynos_get_iovmm(attachment->dev))
 					iovmm_unmap(attachment->dev, base_iova);
-				if (sgt)
-					dma_buf_unmap_attachment(attachment, sgt, dir);
 				return;
 			}
 			mutex_unlock(&ion_dmabuf_iova_lock);
