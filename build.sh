@@ -93,7 +93,20 @@ export BUILD_OPTIONS=(
     HOSTCXX="${WEEBX_PATH}/clang++"
 )
 
+integrate_ksu(){
+    # KernelSU (manual hook) entegrasyonu: workflow ile aynı kaynak
+    if [ ! -d "${KERNEL_ROOT}/KernelSU" ] && [ ! -d "${KERNEL_ROOT}/drivers/kernelsu" ]; then
+        echo -e "\n[INFO]: Integrating KernelSU...\n"
+        curl -LSs "https://raw.githubusercontent.com/keremkt38/KernelSU/fork/kernel/setup.sh" | bash || exit 1
+    else
+        echo -e "\n[INFO]: KernelSU already integrated, skipping.\n"
+    fi
+}
+
 build_kernel(){
+    # 0. KernelSU entegre et (NoMount kernel içinde: CONFIG_NOMOUNT=y, fs/nomount)
+    integrate_ksu
+
     # 1. Defconfig uygula
     make "${BUILD_OPTIONS[@]}" exynos9611-m30s_defconfig || exit 1
 
