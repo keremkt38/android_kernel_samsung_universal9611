@@ -2,15 +2,7 @@ name: Kernel Build
 
 on:
   workflow_dispatch:
-    inputs:
-      selinux_mode:
-        description: 'SELinux modu'
-        required: true
-        default: 'enforcing'
-        type: choice
-        options:
-          - enforcing
-          - permissive
+
 
 jobs:
   build:
