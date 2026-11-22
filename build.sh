@@ -128,6 +128,13 @@ build_kernel(){
     # Geçici kopyalanan .dtb dosyalarını temizle
     rm -f "${KERNEL_ROOT}/"*.dtb
 
+    # 4b. dtbo.img oluştur (dtbs hedefi samsung/*.dtbo dosyalarını zaten derler)
+    echo -e "\n[INFO]: Building DTBO image...\n"
+    python3 "${KERNEL_ROOT}/mkdtboimg.py" cfg_create \
+        "${KERNEL_ROOT}/out/arch/arm64/boot/dtbo.img" \
+        "${KERNEL_ROOT}/build_kernel/configs/dtbo/m30s.cfg" \
+        --dtb-dir "${KERNEL_ROOT}/out/arch/arm64/boot/dts/samsung" || exit 1
+
     # 5. Son olarak Kernel Image imajını derle
     echo -e "\n[INFO]: Building Kernel Image...\n"
     make "${BUILD_OPTIONS[@]}" Image || exit 1
@@ -142,5 +149,6 @@ build_kernel
 mkdir -p AK3
 mv "${KERNEL_ROOT}/out/arch/arm64/boot/Image" AK3/
 mv "${KERNEL_ROOT}/out/arch/arm64/boot/dtb.img" AK3/
+mv "${KERNEL_ROOT}/out/arch/arm64/boot/dtbo.img" AK3/
 
 ls -l AK3

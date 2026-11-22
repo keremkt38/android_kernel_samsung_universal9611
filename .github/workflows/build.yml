@@ -39,6 +39,7 @@ jobs:
         # Kernel image kopyala
         cp AK3/Image AnyKernel3/
         cp AK3/dtb.img AnyKernel3/
+        cp AK3/dtbo.img AnyKernel3/
         cd AnyKernel3
         zip -r "${OUT_NAME}.zip" ./*
         cd ..
