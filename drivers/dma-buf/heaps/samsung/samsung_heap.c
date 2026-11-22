@@ -19,6 +19,8 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 
+#include <asm/cacheflush.h>
+
 #include "heap_private.h"
 
 #define MAX_EVENT_LOG	2048
@@ -142,7 +144,8 @@ bool is_dma_heap_exception_page(struct page *page)
 
 void heap_cache_flush(struct samsung_dma_buffer *buffer)
 {
-	struct device *dev = dma_heap_get_dev(buffer->heap->dma_heap);
+	struct scatterlist *sg;
+	int i;
 
 	if (!dma_heap_skip_cache_ops(buffer->flags))
 		return;
@@ -153,9 +156,14 @@ void heap_cache_flush(struct samsung_dma_buffer *buffer)
 	 * performed on the entire allocated area if the buffer is to be
 	 * protected from non-secure access to prevent the dirty write-back
 	 * to the protected area.
+	 *
+	 * On this 4.14 arm64 kernel the dma-heap class device is created by
+	 * device_create() and never gets DMA ops, so dma_map_sgtable() on it
+	 * resolves to dummy_dma_ops and performs no cache maintenance at all.
+	 * Clean+invalidate the CPU's zero-fill directly instead.
 	 */
-	dma_map_sgtable(dev, &buffer->sg_table, DMA_TO_DEVICE, 0);
-	dma_unmap_sgtable(dev, &buffer->sg_table, DMA_FROM_DEVICE, 0);
+	for_each_sg(buffer->sg_table.sgl, sg, buffer->sg_table.orig_nents, i)
+		__dma_flush_area(sg_virt(sg), sg->length);
 }
 
 void heap_sgtable_pages_clean(struct sg_table *sgt)
